@@ -1,0 +1,4 @@
+SeqFile	DepMethod	Adjust	ReadBP	MapAdjust	SCDepth	EstGenomeSize
+GCF_018873765.1_Tspe_v1_genomic.fna	mpileup	None	48132131844	1.0	52.63	914614058
+GCF_018873765.1_Tspe_v1_genomic.fna	mpileup	CovBases	48132131844	0.946081095007	52.63	865299069
+GCF_018873765.1_Tspe_v1_genomic.fna	mpileup	IndelRatio	48132131844	0.973342756905	52.63	939662879

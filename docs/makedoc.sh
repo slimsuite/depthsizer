@@ -1,3 +1,5 @@
+export RSTUDIO_PANDOC=/Applications/RStudio.app/Contents/MacOS/pandoc
+
 python ../code/depthsizer.py dochtml newlog
 
 python ../code/depthsizer.py --description | sed 's/^/# /' > ../DepthSizer.md

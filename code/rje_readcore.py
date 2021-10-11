@@ -332,23 +332,26 @@ class ReadCore(rje_obj.RJE_Object):
             if expect: raise
         return None
 #########################################################################################################################
-    def getPAFFile(self):  ### Checks for PAF file and returns filename as string
+    def getPAFFile(self,make=True,expect=True):  ### Checks/creates PAF file and returns filename as string
         '''
         Checks for PAF file and returns filename as string.
+        >> make:bool [True] = Whether to make if missing.
+        >> expect:bool [True] = Whether to raise error if missing.
         :return: paffile [str]
         '''
         try:### ~ [1] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             #i# Check for existing PAF file
-            if not self.getBool('Samtools'):
-                raise RuntimeError('Cannot find samtools!')
             seqin = self.getStr('SeqIn')
             paffile = self.setPAFFile()
             if not self.needToRemake(paffile,seqin): return paffile
-            ### ~ [2] Generate BAM file ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            if not make:
+                if expect: raise IOError('{0} not found or too old!'.format(paffile))
+                else: return None
+            ### ~ [2] Generate PAF file ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             if not self.getBool('Minimap2'):
                 raise RuntimeError('Cannot find minimap2!')
             self.printLog('#PAF','Generating PAF file: {0}'.format(paffile))
-            return self.longreadMinimap(paf=True)   #i# Included BAM file and index checks
+            return self.longreadMinimap(paf=True)
         except:
             self.errorLog('{0}.getPAFFile() error'.format(self.prog())); return None
 #########################################################################################################################
@@ -596,29 +599,37 @@ class ReadCore(rje_obj.RJE_Object):
 #########################################################################################################################
     ### <4> ### Read Mapping Methods                                                                                    #
 #########################################################################################################################
-    def setBAMFile(self):   ### Sets BAM File name from settings
+    def setBAMFile(self,baseoveride=True):   ### Sets BAM File name from settings
         '''
         Sets BAM File name from settings. If bam=FILE is not set, will name after seqin=FILE. If seqin=FILE is not set,
         will name after basefile=FILE.
+        >> baseoveride:bool [True] = Whether to over-ride SeqIn basefile if $BASE.bam is found.
         '''
         if not self.getStrLC('BAM'):
+            basebam = self.baseFile(strip_path=True) + '.bam'
+            if baseoveride and rje.exists(basebam):
+                return basebam
             if self.getStrLC('SeqIn'):
                 self.setStr({'BAM': rje.baseFile(self.getStr('SeqIn'),strip_path=True) + '.bam'})
             else:
-                self.setStr({'BAM':self.baseFile(strip_path=True) + '.bam'})
+                self.setStr({'BAM':basebam})
             self.printLog('#BAM','Set BAM file: {0}'.format(self.getStr('BAM')))
         return self.getStr('BAM')
 #########################################################################################################################
-    def setPAFFile(self):   ### Sets PAF File name from settings
+    def setPAFFile(self,baseoveride=True):   ### Sets PAF File name from settings
         '''
         Sets PAF File name from settings. If paf=FILE is not set, will name after seqin=FILE. If seqin=FILE is not set,
         will name after basefile=FILE.
+        >> baseoveride:bool [True] = Whether to over-ride SeqIn basefile if $BASE.paf is found.
         '''
         if not self.getStrLC('PAF'):
+            basepaf = self.baseFile(strip_path=True) + '.paf'
+            if baseoveride and rje.exists(basepaf):
+                return basepaf
             if self.getStrLC('SeqIn'):
-                self.setStr({'PAF': rje.baseFile(self.getStr('SeqIn'),strip_path=True) + '.bam'})
+                self.setStr({'PAF': rje.baseFile(self.getStr('SeqIn'),strip_path=True) + '.paf'})
             else:
-                self.setStr({'PAF':self.baseFile(strip_path=True) + '.bam'})
+                self.setStr({'PAF':basepaf})
             self.printLog('#PAF','Set PAF file: {0}'.format(self.getStr('PAF')))
         return self.getStr('PAF')
 #########################################################################################################################

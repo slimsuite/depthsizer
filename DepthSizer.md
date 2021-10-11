@@ -1,7 +1,7 @@
 # DepthSizer: Read-depth based genome size prediction
 
 ```
-DepthSizer v1.4.0
+DepthSizer v1.4.1
 ```
 
 For a better rendering and navigation of this document, please download and open [`./docs/depthsizer.docs.html`](./docs/depthsizer.docs.html), or visit <https://slimsuite.github.io/depthsizer/>.
@@ -46,6 +46,15 @@ default `IndelRatio`) will be used for "the" genome size prediction.
 **Version 1.1.** The core depth calculation shifted in Version 1.1. `Legacy` mode will use the old code to
 calculate the modal read depth for each BUSCO gene along with the overall modal read depth for all gene
 regions. These are not recommended.
+
+## Citation
+
+DepthSizer is still under review as part of the Waratah genome paper. For now, please cite the preprint:
+
+> Chen SH, Rossetto M, van der Merwe M, Lu-Irving P, Yap JS, Sauquet H, Bourke G, Bragg JG & Edwards RJ (preprint):
+Chromosome-level de novo genome assembly of Telopea speciosissima (New South Wales waratah) using long-reads,
+linked-reads and Hi-C. [bioRxiv 2021.06.02.444084](https://www.biorxiv.org/content/10.1101/2021.06.02.444084v1.full);
+doi: 10.1101/2021.06.02.444084.
 
 ---
 

@@ -19,8 +19,9 @@
 """
 Module:       depthsizer
 Description:  Read-depth based genome size prediction
-Version:      1.4.0
-Last Edit:    07/10/21
+Version:      1.4.1
+Last Edit:    11/10/21
+Citation:     Chen SH et al. & Edwards RJ (preprint): bioRxiv 2021.06.02.444084 (doi: 10.1101/2021.06.02.444084)
 Copyright (C) 2021  Richard J. Edwards - See source code for GNU License Notice
 
 Function:
@@ -116,6 +117,7 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     # 1.3.0 - Added adjust string and benchmark=T option for additional calculations. IndelRatio no longer dev only.
     # 1.3.1 - Tweaked some input checks and log output. Replaced indelratio sort -u with uniq for speed and memory.
     # 1.4.0 - Added seqstats=T/F : Whether to output CN and depth data for full sequences as well as BUSCO genes [False]
+    # 1.4.1 - Added citation and fixed minor output typo.
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -135,7 +137,7 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
 #########################################################################################################################
 def makeInfo(): ### Makes Info object which stores program details, mainly for initial print to screen.
     '''Makes Info object which stores program details, mainly for initial print to screen.'''
-    (program, version, last_edit, copy_right) = ('DepthSizer', '1.4.0', 'October 2021', '2021')
+    (program, version, last_edit, copy_right) = ('DepthSizer', '1.4.1', 'October 2021', '2021')
     description = 'Read-depth based genome size prediction'
     author = 'Dr Richard J. Edwards.'
     comments = ['This program is still in development and has not been published.',rje_obj.zen()]
@@ -312,6 +314,15 @@ class DepthSizer(rje_readcore.ReadCore):
         calculate the modal read depth for each BUSCO gene along with the overall modal read depth for all gene
         regions. These are not recommended.
 
+        ## Citation
+
+        DepthSizer is still under review as part of the Waratah genome paper. For now, please cite the preprint:
+
+        > Chen SH, Rossetto M, van der Merwe M, Lu-Irving P, Yap JS, Sauquet H, Bourke G, Bragg JG & Edwards RJ (preprint):
+        Chromosome-level de novo genome assembly of Telopea speciosissima (New South Wales waratah) using long-reads,
+        linked-reads and Hi-C. [bioRxiv 2021.06.02.444084](https://www.biorxiv.org/content/10.1101/2021.06.02.444084v1.full);
+        doi: 10.1101/2021.06.02.444084.
+
         ---
 
         # Running DepthSizer
@@ -345,7 +356,7 @@ class DepthSizer(rje_readcore.ReadCore):
 
         ```
         ### ~ Main DepthSizer run options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-        seqin=FILE      : Input sequence assembly. [None]
+        seqin=FILE      : Input sequence assembly [None]
         basefile=FILE   : Root of output file names [gapspanner or $SEQIN basefile]
         summarise=T/F   : Whether to generate and output summary statistics sequence data before and after processing [True]
         genomesize=INT  : Haploid genome size (bp) [0]
@@ -587,7 +598,7 @@ class DepthSizer(rje_readcore.ReadCore):
             self.infoLog('Actual genome size likely to fall within range of output predictions.')
             if self.getBool('Benchmark'):
                 self.infoLog('Ignore "Assembly" and "MeanX" predictions: benchmarking only.')
-            self.printLog('#FINAL','Estimated genome size (adjustmode={0}) = {1}'.format(rje_seqlist.dnaLen(gensize,dp=0,sf=3),self.getStr('AdjustMode')))
+            self.printLog('#FINAL','Estimated genome size (adjustmode={1}) = {0}'.format(rje_seqlist.dnaLen(gensize,dp=0,sf=3),self.getStr('AdjustMode')))
             if self.getStrLC('AdjustMode') == 'covbases':
                 self.warnLog('Estimated genome size is likely to be an underestimate. See: {0}'.format(gfile))
             else:

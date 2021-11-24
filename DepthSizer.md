@@ -1,7 +1,7 @@
 # DepthSizer: Read-depth based genome size prediction
 
 ```
-DepthSizer v1.4.1
+DepthSizer v1.6.0
 ```
 
 For a better rendering and navigation of this document, please download and open [`./docs/depthsizer.docs.html`](./docs/depthsizer.docs.html), or visit <https://slimsuite.github.io/depthsizer/>.
@@ -51,9 +51,9 @@ regions. These are not recommended.
 
 DepthSizer is still under review as part of the Waratah genome paper. For now, please cite the preprint:
 
-> Chen SH, Rossetto M, van der Merwe M, Lu-Irving P, Yap JS, Sauquet H, Bourke G, Bragg JG & Edwards RJ (preprint):
+> Chen SH, Rossetto M, van der Merwe M, Lu-Irving P, Yap JS, Sauquet H, Bourke G, Amos TG, Bragg JG & Edwards RJ (preprint):
 Chromosome-level de novo genome assembly of Telopea speciosissima (New South Wales waratah) using long-reads,
-linked-reads and Hi-C. [bioRxiv 2021.06.02.444084](https://www.biorxiv.org/content/10.1101/2021.06.02.444084v1.full);
+linked-reads and Hi-C. [bioRxiv 2021.06.02.444084](https://www.biorxiv.org/content/10.1101/2021.06.02.444084v2.full);
 doi: 10.1101/2021.06.02.444084.
 
 ---
@@ -101,7 +101,7 @@ tmpdir=PATH     : Path for temporary output files during forking (not all modes)
 ### ~ Genome size prediction options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
 busco=TSVFILE   : BUSCO full table [full_table_$BASEFILE.busco.tsv]
 readbp=INT      : Total combined read length for depth calculations (over-rides reads=FILELIST) []
-adjustmode=X    : Map adjustment method to apply (None/CovBases/IndelRatio/MapAdjust) [IndelRatio]
+adjustmode=X    : Map adjustment method to apply (None/CovBases/IndelRatio/MapBases/MapAdjust/MapRatio/OldAdjust/OldCovBases) [IndelRatio]
 quickdepth=T/F  : Whether to use samtools depth in place of mpileup (quicker but underestimates?) [False]
 covbases=T/F    : Whether to calculate predicted minimum genome size based on mapped reads only [True]
 mapadjust=T/F   : Whether to calculate mapadjust predicted genome size based on read length:mapping ratio [False]
@@ -204,13 +204,16 @@ estimate the proportion of the raw sequencing data that contributed to the singl
 a multiplier for the total read volume. Extreme mapadjust ratios should be treated with caution and
 may indicate problems with the assembly and/or source data.
 * `Assembly` : In `benchmark=T` mode, the observed assembly size is output.
-* `MeanX` : In `benchmark=T` mode, the mean coverage is calculated a `CovBases`/`AssemblySize` and used in place
+* `MeanX` : In `benchmark=T` mode, the mean coverage is calculated as `CovBases`/`AssemblySize` and used in place
 of `scdepth` for the genome size estimation using the full sequencing volume.
 
 By default, DepthSizer will estimate genome sizes using `IndelRatio`, `CovBases` in addition to `None`. For
 speed, `CovBases` can be switched off with `covbases=F` and `IndelRatio` by setting `adjustmode=None`. The old
 `MapAdjust` calculation is not made by default, but can be switched on with `mapadjust=T`, `adjustmode=MapAdjust`,
 or `benchmark=T`. Setting `benchmark=T` will output all six estimates.
+
+**NOTE:** v1.5.0 expands the options to None/CovBases/IndelRatio/MapBases/MapAdjust/MapRatio/OldAdjust/OldCovBases.
+Details to follow.
 
 ## Step 5: Total read volume
 

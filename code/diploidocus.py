@@ -19,9 +19,11 @@
 """
 Module:       Diploidocus
 Description:  Diploid genome assembly analysis toolkit
-Version:      0.18.0
-Last Edit:    15/09/21
-Citation:     Edwards RJ et al. (2021), BMC Genomics [PMID: 33726677]
+Version:      1.0.0
+Last Edit:    19/11/21
+Nala Citation:  Edwards RJ et al. (2021), BMC Genomics [PMID: 33726677]
+DipNR Citation: Stuart KC, Edwards RJ et al. (preprint), bioRxiv 2021.04.07.438753; [doi: 10.1101/2021.04.07.438753]
+Tidy Citation:  Chen SH et al. & Edwards RJ (preprint), bioRxiv 2021.06.02.444084; [doi: 10.1101/2021.06.02.444084]
 GitHub:       https://github.com/slimsuite/diploidocus
 Copyright (C) 2020  Richard J. Edwards - See source code for GNU License Notice
 
@@ -446,6 +448,7 @@ Commandline:
     qsubvmem=INT    : Memory setting (Gb) when queuing with qsub [126]
     qsubwall=INT    : Walltime setting (hours) when queuing with qsub [12]
     modules=LIST    : List of modules that needs to be loaded for running with qsub []
+    legacy=T/F      : Run Legacy modes of updated methods that have been farmed out to other programs [False]
     ### ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
 
 """
@@ -458,6 +461,7 @@ sys.path.append(os.path.join(slimsuitepath,'libraries/'))
 sys.path.append(os.path.join(slimsuitepath,'tools/'))
 ### User modules - remember to add *.__doc__ to cmdHelp() below ###
 import rje, rje_db, rje_forker, rje_obj, rje_rmd, rje_seqlist, rje_sequence, rje_paf #, rje_genomics
+import rje_kat, rje_readcore, depthkopy, depthsizer
 import rje_blast_V2 as rje_blast
 import smrtscape
 import slimfarmer
@@ -512,6 +516,7 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     # 0.17.1 - Minor tweaks to log output.
     # 0.17.2 - Stopped CSI indexing from crashing Diploidocus but not compatible with PurgeHaplotigs.
     # 0.18.0 - Implementation of density-based CNV estimation (dev=T).
+    # 1.0.0 - Updated to use rje_kat and rje_readcore and made v1.0.0 in line with Stuart et al. publication.
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -521,7 +526,7 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
     # [Y] : Add full description of program to module docstring.
     # [Y] : Create initial working version of program.
     # [X] : Add REST outputs to restSetup() and restOutputOrder()
-    # [ ] : Add to SLiMSuite or SeqSuite.
+    # [Y] : Add to SLiMSuite or SeqSuite.
     # [ ] : Add download of NCBI Vector Database if vecdb=ncbi.
     # [Y] : Need to add a eukaryote mode and/or minlen for VecScreen - too many expected hits with NCBI rules.
     # [Y] : Add eFDR calculation and filtering to VecScreen.
@@ -547,7 +552,7 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
     # [ ] : Add (optional?) re-use of the first vecscreen search if purgemode=dipcycle and no additional trimming.
     # [Y] : Add maxcycle=INT to terminate dipcycle after INT cycles.
     # [ ] : Document regcheck process.
-    # [ ] : Test regcheck GFF mode.
+    # [Y] : Test regcheck GFF mode.
     # [Y] : Add gapspan mode = same as regcheck but first makes the gaps table, then loads this in, and outputs reads per gap.
     # [Y] : Add gapass mode = gap reassembly, trying to assemble the reads spanning each gap
     # [Y] : Add gapfill mode = runs GABLAM of assembly versus original gap chunk and then tries to fill gaps?
@@ -566,15 +571,17 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
     # [ ] : Add optional additional BAM files to collate depth stats for (e.g. short reads)
     # [ ] : Replace PurgeHaplotigs so that CSI indexing is OK.
     # [ ] : Add DensK and DensDep statistics for each sequence, using new DepthCopy code.
+    # [Y] : Update to Version 1.0.
     '''
 #########################################################################################################################
 def makeInfo(): ### Makes Info object which stores program details, mainly for initial print to screen.
     '''Makes Info object which stores program details, mainly for initial print to screen.'''
-    (program, version, last_edit, copy_right) = ('Diploidocus', '0.18.0', 'September 2021', '2017')
+    (program, version, last_edit, copy_right) = ('Diploidocus', '1.0.0', 'November 2021', '2017')
     description = 'Diploid genome assembly analysis toolkit.'
     author = 'Dr Richard J. Edwards.'
-    comments = ['NOTE: telomere finding rules are based on https://github.com/JanaSperschneider/FindTelomeres',
-                'This program is still in development and has not been published.',rje_obj.zen()]
+    comments = ['Please raise bugs or questions at https://github.com/slimsuite/diploidocus.',
+                'NOTE: telomere finding rules are based on https://github.com/JanaSperschneider/FindTelomeres',
+                rje_obj.zen()]
     return rje.Info(program,version,last_edit,description,author,time.time(),copy_right,comments)
 #########################################################################################################################
 def cmdHelp(info=None,out=None,cmd_list=[]):   ### Prints *.__doc__ and asks for more sys.argv commands
@@ -632,7 +639,7 @@ paf_defaults = {'N':'250','p':'0.0001','x':'asm20'}
 #########################################################################################################################
 ### SECTION II: Diploidocus Class                                                                                       #
 #########################################################################################################################
-class Diploidocus(rje_obj.RJE_Object):
+class Diploidocus(rje_readcore.ReadCore,rje_kat.KAT):
     '''
     Diploidocus Class. Author: Rich Edwards (2019).
 
@@ -662,6 +669,7 @@ class Diploidocus(rje_obj.RJE_Object):
     - Diploidocus=T/F : Whether to code is being run from a direct Diploidocus commandline call [False]
     - IncludeGaps=T/F : Whether to include gaps in the zero coverage bases for adjustment (see docs) [False]
     - KeepNames=T/F   : Whether to keep names unchanged for edited sequences or append 'X' [False]
+    - Legacy=T/F      : Run Legacy modes of updated methods that have been farmed out to other programs [False]
     - MapAdjust=T/F   : Whether to adjust predicted genome size based on read length:mapping ratio [False]
     - PreTrim=T/F     : Run vectrim/vecmask and deptrim trimming prior to diploidocus run [False]
     - PurgeCyc=INT    : Minimum number of purged sequences to trigger next round of dipcycle [2]
@@ -733,7 +741,7 @@ class Diploidocus(rje_obj.RJE_Object):
         '''Sets Attributes of Object.'''
         ### ~ Basics ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         self.strlist = ['BAM','BUSCO','GenomeSize','MaskMode','PAF','Parent1','Parent2','PurgeMode','RegCheck','RunMode','ScreenDB','ScreenMode','SeqIn','SeqOut','DebugStr','SpanID','TeloFwd','TeloRev','TmpDir']
-        self.boollist = ['DepDensity','Diploidify','Diploidocus','DocHTML','IncludeGaps','KeepNames','MapAdjust','PreTrim','QuickDepth','RegCNV','Summarise','UseQSub','VecCheck','ZeroAdjust','10xTrim']
+        self.boollist = ['DepDensity','Diploidify','Diploidocus','DocHTML','IncludeGaps','KeepNames','Legacy','MapAdjust','PreTrim','QuickDepth','RegCNV','Summarise','UseQSub','VecCheck','ZeroAdjust','10xTrim']
         self.intlist = ['DepTrim','GenomeSize','LenFilter','MaxCycle','MinGap','MinGapSpan','MinIDHit','MinLen','MinMedian','MinTrim','MinVecHit',
                         'QSubPPN','QSubVMem','QSubWall','MemPerThread','MinLocLen','PurgeCyc',
                         'PHLow','PHMid','PHHigh','ReadBP','SubForks','TeloSize','VecMask','VecTrim']
@@ -744,8 +752,12 @@ class Diploidocus(rje_obj.RJE_Object):
         self.objlist = ['Forker','SeqIn']
         ### ~ Defaults ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         self._setDefaults(str='None',bool=False,int=0,num=0.0,obj=None,setlist=True,setdict=True,setfile=True)
+        self._setReadCoreAttributes()   # See rje_readcore
+        self._setKatAttributes()        # See rje_kat
         self.setStr({'MaskMode':'partial','PurgeMode':'complex','RunMode':'diploidocus','ScreenMode':'report','TeloFwd':'C{2,4}T{1,2}A{1,3}','TeloRev':'','TmpDir':'./tmpdir/'})
-        self.setBool({'DepDensity':True,'Diploidify':False,'DocHTML':False,'IncludeGaps':False,'KeepNames':False,'PreTrim':False,'QuickDepth':False,'RegCNV':True,'Summarise':True,'UseQSub':False,'ZeroAdjust':True,'10xTrim':False})
+        self.setBool({'DepDensity':True,'Diploidify':False,'DocHTML':False,'IncludeGaps':False,'KeepNames':False,
+                      'Legacy':False,
+                      'PreTrim':False,'QuickDepth':False,'RegCNV':True,'Summarise':True,'UseQSub':False,'ZeroAdjust':True,'10xTrim':False})
         self.setInt({'DepTrim':0,'LenFilter':500,'MaxCycle':0,'MinMedian':3,'MinIDHit':27,'MinLen':500,'MinTrim':1000,'MinVecHit':50,
                      'QSubPPN':16,'QSubVMem':126,'QSubWall':12,'MemPerThread':6,'MinGapSpan':2,'MinLocLen':500,'PurgeCyc':2,
                      'GenomeSize':0,'ReadBP':0,'SubForks':1,'TeloSize':50,'MinGap':10,'VecMask':900,'VecTrim':1000})
@@ -768,13 +780,15 @@ class Diploidocus(rje_obj.RJE_Object):
             try:
                 self._generalCmd(cmd)   ### General Options ### 
                 self._forkCmd(cmd)  # Delete if no forking
-                ### Class Options (No need for arg if arg = att.lower()) ### 
+                self._readCoreCmd(cmd)  # Will set all the core commands recognised.
+                self._katCmd(cmd)       # Set kat commands recognised.
+                ### Class Options (No need for arg if arg = att.lower()) ###
                 #self._cmdRead(cmd,type='str',att='Att',arg='Cmd')  # No need for arg if arg = att.lower()
                 self._cmdReadList(cmd,'str',['GenomeSize','DebugStr','MaskMode','PurgeMode','RunMode','ScreenMode','SpanID','TeloFwd','TeloRev'])   # Normal strings
                 self._cmdReadList(cmd,'path',['TmpDir'])  # String representing directory path
                 self._cmdReadList(cmd,'file',['BAM','PAF','Parent1','Parent2','RegCheck','ScreenDB','SeqIn','SeqOut','BUSCO'])  # String representing file path
                 #self._cmdReadList(cmd,'date',['Att'])  # String representing date YYYY-MM-DD
-                self._cmdReadList(cmd,'bool',['DepDensity','Diploidify','Diploidocus','DocHTML','IncludeGaps','KeepNames','MapAdjust','PreTrim','QuickDepth','RegCNV','Summarise','UseQSub','VecCheck','ZeroAdjust','10xTrim'])  # True/False Booleans
+                self._cmdReadList(cmd,'bool',['DepDensity','Diploidify','Diploidocus','DocHTML','IncludeGaps','KeepNames','Legacy','MapAdjust','PreTrim','QuickDepth','RegCNV','Summarise','UseQSub','VecCheck','ZeroAdjust','10xTrim'])  # True/False Booleans
                 self._cmdReadList(cmd,'int',['DepTrim','LenFilter','MaxCycle','MemPerThread','MinGap','MinGapSpan','MinIDHit','MinLocLen','MinLen','MinMedian','MinTrim','MinVecHit','PurgeCyc','QSubPPN','QSubVMem','QSubWall','PHLow','PHMid','PHHigh','ReadBP','SubForks','TeloSize','VecMask','VecTrim'])   # Integers
                 self._cmdReadList(cmd,'float',['eFDR','RQFilter','SCDepth']) # Floats
                 self._cmdReadList(cmd,'perc',['CheckCov','MinLocID','TeloPerc','VecPurge']) # Percentage
@@ -1791,17 +1805,28 @@ class Diploidocus(rje_obj.RJE_Object):
             elif self.getStrLC('RunMode') == 'diploidocus': return self.diploidocusHocusPocus()
             elif self.getStrLC('RunMode').startswith('purgehap'): return self.diploidocusHocusPocus()
             elif self.getStrLC('RunMode') in ['gensize','genomesize']:
-                if self.getBool('Diploidocus'):
-                    self.printLog('#NOTE','Please use DepthSizer for future Diploidocus gensize runs.')
-                return self.genomeSize(makebam=True)
+                if not self.getBool('Legacy'):
+                    self.infoLog('Running DepthSizer for gensize mode (legacy=F)')
+                    return self.genomeSize()
+                self.infoLog('Running legacy gensize mode (legacy=T)')
+                return self.legacyGenomeSize(makebam=True)
             elif self.getStrLC('RunMode') in ['dipcycle','purgecycle']: return self.purgeCycle()
             elif self.getStrLC('RunMode') in ['deptrim']: return self.depthTrim()
             elif self.getStrLC('RunMode') in ['gapspan','gapass','gapfill']: return self.gapSpan()
-            elif self.getStrLC('RunMode') in ['regcheck','regcnv']: return self.regCheck()
+            elif self.getStrLC('RunMode') in ['regcheck']: return self.regCheck()
+            elif self.getStrLC('RunMode') in ['regcnv']:
+                if self.getBool('Legacy'):
+                    self.infoLog('Running legacy regcnv mode (legacy=T)')
+                    return self.regCheck()
+                self.infoLog('Running DepthKopy for regcnv mode (legacy=F)')
+                depcmd = ['winsize=0'] + self.cmd_list + ['regfile={0}'.format(self.getStr('RegCheck'))]
+                depcmd += ['checkfields={0}'.format(','.join(self.list['CheckFields']))]
+                if not depthkopy.DepthKopy(self.log,depcmd).run(): raise ValueError('DepthKopy failed')
+                return True
             else: raise ValueError('RunMode="%s" not recognised!' % self.getStrLC('RunMode'))
         except:
             self.errorLog(self.zen())
-            raise   # Delete this if method error not terrible
+        return False
 #########################################################################################################################
     def purgeCycle(self):  ### Repeat Diploidocus purge cycles to convergence (none removed).                    # v0.7.0
         '''
@@ -2020,7 +2045,7 @@ class Diploidocus(rje_obj.RJE_Object):
         except: self.errorLog('Problem during %s setup.' % self.prog()); return False  # Setup failed
 #########################################################################################################################
     #i# This method is being added to ReadCore.
-    def seqinObj(self,summarise=True): ### Returns the a SeqList object for the SeqIn file
+    def LEGACYseqinObj(self,summarise=True): ### Returns the a SeqList object for the SeqIn file
         '''
         Returns the a SeqList object for the SeqIn file.
         :return: self.obj['SeqIn']
@@ -2063,7 +2088,7 @@ class Diploidocus(rje_obj.RJE_Object):
             raise   # Delete this if method error not terrible
 #########################################################################################################################
     #!# Try replacing with rje_obj version
-    def loggedSysCall(self,cmd,syslog=None,stderr=True,append=True,verbosity=1,nologline='WARNING: No run log output!',threaded=True):    ### Makes a system call, catching output in log file
+    def LEGACYloggedSysCall(self,cmd,syslog=None,stderr=True,append=True,verbosity=1,nologline='WARNING: No run log output!',threaded=True):    ### Makes a system call, catching output in log file
         '''
         Makes a system call, catching output in log file.
         :param cmd:str = System call command to catch
@@ -2984,7 +3009,8 @@ class Diploidocus(rje_obj.RJE_Object):
             self.errorLog('Diploidocus.vecPurge() error'); raise
         return None
 #########################################################################################################################
-    #!# This will be replaced with DepthCopy
+    #!# regcnv has been replaced with DepthKopy
+    #!# should drop regcnv=T from regcheck mode until tidier
     def regCheck(self): ### Performs read check and/or CNV analysis of supplied region
         '''
         Performs read check and/or CNV analysis of supplied region. Based on VecCheck and SCDepth methods.
@@ -3124,6 +3150,7 @@ class Diploidocus(rje_obj.RJE_Object):
                 if not self.getBool('RegCNV'):
                     cdb.saveToFile(backup=False)
                     return True
+                else: self.warnLog('RegCNV mode has been improved with DepthKopy - it is recommended to run that instead.')
 
             ### ~ [3] Complex BAM-based method for CNV calculation ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             if self.getStrLC('RunMode') in ['regcnv']: cdb.setStr({'Name':'checkcnv'})
@@ -3757,6 +3784,23 @@ class Diploidocus(rje_obj.RJE_Object):
 # echo 'Depth:'
 # awk '{print $3;}' busco.depth.txt | sort | uniq -c | sort -nr | head
 #########################################################################################################################
+    def genomeSize(self,scdepth=False):   ### Uses read depth from BUSCO single copy genes to predict genome size
+        '''
+        Uses read depth from BUSCO single copy genes to predict genome size.
+        >> scdepth:bool [False] = Whether to return single copy read depth only (w/o Genome Size prediction)
+        '''
+        try:### ~ [1] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            if not self.obj['DepthSizer']:
+                self.obj['DepthSizer'] = depthsizer.DepthSizer(self.log, ['basefile=depthsizer'] + self.cmd_list)
+                self.obj['DepthSizer'].setup()
+            if scdepth: return self.obj['DepthSizer'].getSCDepth()
+            estgensize = self.obj['DepthSizer'].depthSizer()
+            self.setInt({'EstGenomeSize': estgensize})
+            return estgensize
+        except:
+            self.errorLog('Diploidocus.genomeSize() error')
+            return False
+#########################################################################################################################
     def genomeSizeFromModeFile(self,dephist,scdepth=False):   ### Uses read depth from BUSCO single copy genes to predict genome size
         '''
         Uses read depth from BUSCO single copy genes to predict genome size.
@@ -3824,7 +3868,7 @@ class Diploidocus(rje_obj.RJE_Object):
             self.errorLog('Diploidocus.genomeSizeFromModeFile() error')
             return False
 #########################################################################################################################
-    def genomeSize(self,scdepth=False,makebam=False):   ### Uses read depth from BUSCO single copy genes to predict genome size
+    def legacyGenomeSize(self,scdepth=False,makebam=False):   ### Uses read depth from BUSCO single copy genes to predict genome size
         '''
         Uses read depth from BUSCO single copy genes to predict genome size.
         >> scdepth:bool [False] = Whether to return single copy read depth only (w/o Genome Size prediction)
@@ -4096,7 +4140,7 @@ class Diploidocus(rje_obj.RJE_Object):
             return self.calculateGenomeSize(readbp)
         except SystemExit: raise    # Child
         except:
-            self.errorLog('Diploidocus.genomeSize() error')
+            self.errorLog('Diploidocus.legacyGenomeSize() error')
             return False
 #########################################################################################################################
     def calculateGenomeSize(self,readbp):  ### Calculates genome size from stored values and reports
@@ -4172,7 +4216,8 @@ class Diploidocus(rje_obj.RJE_Object):
             self.errorLog('Diploidocus.assemblyMinimap() error')
             return False
 #########################################################################################################################
-    def longreadMinimap(self):  ### Performs long read versus assembly minimap2 and converts to BAM file
+    #!# Now ReadCore.longreadMinimap(paf=False)
+    def LEGACYlongreadMinimap(self):  ### Performs long read versus assembly minimap2 and converts to BAM file
         '''
         Performs long read versus assembly minimap2 and converts to BAM file
         :return: bamfile/None
@@ -4269,7 +4314,8 @@ class Diploidocus(rje_obj.RJE_Object):
             self.errorLog('Diploidocus.longreadMinimap() error')
             return None
 #########################################################################################################################
-    def getBamFile(self):  ### Checks/Creates indexed BAM file and returns filename as string
+    #i# Now part of ReadCore
+    def LEGACYgetBamFile(self):  ### Checks/Creates indexed BAM file and returns filename as string
         '''
         Checks/Creates indexed BAM file and returns filename as string.
         :return: bamfile [str]
@@ -4309,7 +4355,8 @@ class Diploidocus(rje_obj.RJE_Object):
         except:
             self.errorLog('Diploidocus.getBamFile() error'); raise
 #########################################################################################################################
-    def getPAFFile(self):  ### Checks for PAF file and returns filename as string
+    #i# Now part of ReadCore
+    def LEGACYgetPAFFile(self):  ### Checks for PAF file and returns filename as string
         '''
         Checks for PAF file and returns filename as string.
         :return: paffile [str]

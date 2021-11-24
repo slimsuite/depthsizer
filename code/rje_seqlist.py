@@ -19,8 +19,8 @@
 """
 Module:       rje_seqlist
 Description:  RJE Nucleotide and Protein Sequence List Object (Revised)
-Version:      1.46.2
-Last Edit:    06/09/21
+Version:      1.48.0
+Last Edit:    19/11/21
 Copyright (C) 2011  Richard J. Edwards - See source code for GNU License Notice
 
 Function:
@@ -90,7 +90,7 @@ Commandline:
     duperr=T/F      : Whether identification of duplicate sequence names should raise an error [True]
 
     ### ~ SEQUENCE FORMATTING ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-    reformat=X      : Output format for sequence files (fasta/short/acc/acclist/accdesc/speclist/index/dna2prot/dna2orfs/peptides/(q)region/revcomp/reverse/descaffold) [fasta]
+    reformat=X      : Output format for sequence files (fasta/short/acc/acclist/accdesc/speclist/index/dna2prot/dna2orfs/peptides/(q)region/revcomp/reverse/descaffold/degap) [fasta]
     rename=T/F      : Whether to rename sequences [False]
     spcode=X        : Species code for non-gnspacc format sequences [None]
     newacc=X        : New base for sequence accession numbers - will rename sequences [None]
@@ -147,6 +147,7 @@ Commandline:
     fracstep=INT    : Step size for NXX and LXX fractions (1/2/5/10/25) [5]
     lenstats=LIST   : List of min sequence lengths to output stats for (raw=T) []
     gapstats=T/F    : Output a summary of assembly gap sizes and positions [False]
+    contigs=T/F     : Output a table of contigs during summarise (sets gapstats=T) [False]
     mingap=INT      : Minimum length of a stretch of N bases to count as a gap (0=None unless gapstats=T) [10]
     gapfix=X:Y(,X:Y): List of gap lengths X to convert to different lengths Y []
     maker=T/F       : Whether to extract MAKER2 statistics (AED, eAED, QI) from sequence names [False]
@@ -166,7 +167,12 @@ import os, random, re, string, sys, time
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)),'../libraries/'))
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)),'../tools/'))
 ### User modules - remember to add *.__doc__ to cmdHelp() below ###
-import rje, rje_db, rje_menu, rje_obj, rje_sequence, rje_uniprot, rje_zen
+import rje, rje_db, rje_menu, rje_obj, rje_sequence, rje_zen
+rje_uniprot = False
+try:
+    import rje_uniprot
+except:
+    rje_uniprot = False
 #########################################################################################################################
 def history():  ### Program History - only a method for PythonWin collapsing! ###
     '''
@@ -249,6 +255,8 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     # 1.46.0 - Added dna2orfs reformatting options.
     # 1.46.1 - Tweaked the batchSummarise method.
     # 1.46.2 - Added orfgaps=T/F. Partial implementation of GFF output for dna2orfs reformatting. Need completion.
+    # 1.47.0 - Added reformat=degap option for removing alignment gaps from input sequences.
+    # 1.48.0 - Output a table of contigs during summarise (sets gapstats=T) [False]. Removed some dependencies.
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -276,7 +284,7 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
 #########################################################################################################################
 def makeInfo(): ### Makes Info object which stores program details, mainly for initial print to screen.
     '''Makes Info object which stores program details, mainly for initial print to screen.'''
-    (program, version, last_edit, copy_right) = ('SeqList', '1.46.2', 'September 2021', '2011')
+    (program, version, last_edit, copy_right) = ('SeqList', '1.48.0', 'November 2021', '2011')
     description = 'RJE Nucleotide and Protein Sequence List Object (Revised)'
     author = 'Dr Richard J. Edwards.'
     comments = ['This program is still in development and has not been published.',rje_zen.Zen().wisdom()]
@@ -369,6 +377,7 @@ class SeqList(rje_obj.RJE_Object):
     - AutoFilter = Whether to automatically apply sequence filtering. [True]
     - AutoLoad = Whether to automatically load sequences upon initialisation. [True]
     - Concatenate = Concatenate sequences into single output sequence named after file [False]
+    - Contigs = Output a table of contigs during summarise (sets gapstats=T) [False]
     - DNA = Alternative option to indicate dealing with nucleotide sequences [False]
     - DupErr = Whether identification of duplicate sequence names should raise an error [True]
     - Edit = Enter sequence edit mode upon loading (will switch seqmode=list) [False]
@@ -436,7 +445,7 @@ class SeqList(rje_obj.RJE_Object):
         self.strlist = ['Edit','Name','NameFormat','NewAcc','NewDesc','Region','GrabSeq','MaskSeq',
                         'SeqDB','SeqDictType','SeqFormat','SeqIn','SeqMode','SeqType','SeqOut',
                         'Reformat','SpCode','SeqNR','NewGene','Split','SortSeq','SplitSeq','TileName','TmpDir']
-        self.boollist = ['AutoFilter','AutoLoad','Concatenate','DNA','DupErr','Edit','GapStats','GeneCounter','GrepNR',
+        self.boollist = ['AutoFilter','AutoLoad','Concatenate','Contigs','DNA','DupErr','Edit','GapStats','GeneCounter','GrepNR',
                          'GeneSpAcc','Maker','Mixed','FracStats','ORFGaps','ORFMet','ReName','RevCompNR','SizeSort','TwoPass','KeepName',
                          'Raw','SeqIndex','SeqShuffle','Summarise','UseCase']
         self.intlist = ['AddFlanks','FracStep','MinGap','MinLen','MaxLen','MinORF','RFTran','TerMinORF','Tile','TileStep']
@@ -447,7 +456,7 @@ class SeqList(rje_obj.RJE_Object):
         ### ~ Defaults ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         self._setDefaults(str='None',bool=False,int=0,num=0.0,obj=None,setlist=True,setdict=True)
         self.setStr({'SeqMode':'file','ReFormat':'None','Region':'1,-1','TileName':'pos','TmpDir':rje.makePath('./tmp/')})
-        self.setBool({'AutoFilter':True,'AutoLoad':True,'DupErr':True,'GapStats':False,'GeneSpAcc':True,'KeepName':True,
+        self.setBool({'AutoFilter':True,'AutoLoad':True,'Contigs':False,'DupErr':True,'GapStats':False,'GeneSpAcc':True,'KeepName':True,
                       'ORFMet':True,'Raw':False,'SeqIndex':True,'GrepNR':True,'RevCompNR':True,'TwoPass':True,'ORFGaps':True})
         self.setInt({'FracStep':5,'MinGap':10,'MinORF':-1,'RFTran':1,'TerMinORF':-1,'Tile':0,'TileStep':0})
         self.setNum({'MinTile':0.1})
@@ -480,7 +489,7 @@ class SeqList(rje_obj.RJE_Object):
                 self._cmdReadList(cmd,'nlist',['Sampler'])
                 self._cmdReadList(cmd,'cdict',['GapFix'])
                 self._cmdRead(cmd,type='bool',att='GeneSpAcc',arg='gnspacc')
-                self._cmdReadList(cmd,'bool',['Align','AutoFilter','AutoLoad','Concatenate','DNA','DupErr','Edit','GapStats','GeneCounter','GeneSpAcc','GrepNR','KeepName','Maker','Mixed','FracStats','ORFGaps','ORFMet','Raw','ReName','RevCompNR','SizeSort','SeqIndex','SeqNR','SeqShuffle','Summarise','TwoPass','UseCase'])
+                self._cmdReadList(cmd,'bool',['Align','AutoFilter','AutoLoad','Concatenate','Contigs','DNA','DupErr','Edit','GapStats','GeneCounter','GeneSpAcc','GrepNR','KeepName','Maker','Mixed','FracStats','ORFGaps','ORFMet','Raw','ReName','RevCompNR','SizeSort','SeqIndex','SeqNR','SeqShuffle','Summarise','TwoPass','UseCase'])
             except: self.errorLog('Problem with cmd:%s' % cmd)
         ## ~ [1a] ~ Tidy Commands ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
         if self.getStrLC('SeqMode') == 'tuple': self.setStr({'SeqMode':'list'})
@@ -510,7 +519,7 @@ class SeqList(rje_obj.RJE_Object):
             self.warnLog('rftran=%d not recognised: will use rftran=1' % self.getInt('RFTran'))
             self.setInt({'RFTran':1})
         ## ~ [1b] ~ REST Command setup/adjustment ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
-        if self.getStrLC('Rest') in string.split('fasta/short/acc/acclist/accdesc/speclist/index/dna2prot/dna2orfs/rna2prot/translate/nt2prot/peptides/qregion/region/descaffold','/'):
+        if self.getStrLC('Rest') in string.split('fasta/short/acc/acclist/accdesc/speclist/index/dna2prot/dna2orfs/rna2prot/translate/nt2prot/peptides/qregion/region/descaffold/degap','/'):
             self.setStr({'ReFormat':self.getStrLC('Rest')})
             self.dict['Output'][self.getStrLC('Rest')] = 'SeqOut'
         elif self.getStrLC('Rest') and self.getStrLC('ReFormat'):
@@ -1009,7 +1018,7 @@ class SeqList(rje_obj.RJE_Object):
         '''
         try:### ~ [0] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             raw = self.getBool('Raw') and self.dna()
-            gapstats = self.dna() and self.getBool('GapStats') and not raw     # Might need to move this to function argument?
+            gapstats = self.dna() and (self.getBool('GapStats') or self.getBool('Contigs')) and not raw     # Might need to move this to function argument?
             fracstats = self.dna() and self.getBool('FracStats')
             fracstep = self.getInt('FracStep')
             if fracstats and fracstep not in [1,2,5,10,25] and not raw:
@@ -1121,6 +1130,7 @@ class SeqList(rje_obj.RJE_Object):
             if (sumdb or self.mode().endswith('db')) and save: sdb.saveToFile('%s.sequences.tdt' % seqbase)
             if gapstats:
                 if save: gapdb.saveToFile('%s.gaps.tdt' % seqbase)
+                gapdb = self.db().copyTable(gapdb,'gaplen')
                 gapdb.addField('N',evalue=1)
                 gapdb.addField('term',evalue=0)
                 for gapentry in gapdb.entries():
@@ -1128,6 +1138,7 @@ class SeqList(rje_obj.RJE_Object):
                 gapdb.compress(['gaplen'],{'N':'sum','term':'sum'})
                 gapdb.keepFields(['gaplen','N','term'])
                 if save: gapdb.saveToFile('%s.gaplen.tdt' % seqbase)
+            if self.getBool('Contigs'): self.contigsTable(save=save)
 
             # Total sequence length
             sumlen = sum(seqlen)
@@ -2030,7 +2041,7 @@ class SeqList(rje_obj.RJE_Object):
                     self.errorLog('No file name given: cannot load sequences!')
                     return False
             while not os.path.exists(seqfile):
-                if ',' in seqfile or '.' not in seqfile: # Interpret as uniprot extraction list
+                if (',' in seqfile or '.' not in seqfile) and rje_uniprot: # Interpret as uniprot extraction list
                     uniprot = rje_uniprot.UniProt(self.log,self.cmd_list)
                     uniprot._extractProteinsFromURL(string.split(seqfile,','))
                     self.setStr({'SeqMode':'list','SeqType':'protein'})
@@ -2041,6 +2052,7 @@ class SeqList(rje_obj.RJE_Object):
                         return True
                     else: self.printLog('\r#FAIL','%s not recognised as Uniprot accnum.' % seqfile)
                 if self.i() >= 0:
+                    if not rje_uniprot: self.infoLog('rje_uniprot not found: no Uniprot extraction.')
                     seqfile = rje.choice(text='Input file "%s" not found. Input filename? (Blank to exit.)' % seqfile)
                     if seqfile == '': sys.exit()
                 else:
@@ -2783,7 +2795,10 @@ class SeqList(rje_obj.RJE_Object):
                         endchop = slen - len(sequence[:qend]) - sequence[qend:].count('-')   # Positions lost
                         sequence = sequence[qstart:qend]
                     else: sequence = sequence[qstart:]
-                if reformat[:3] in ['fas']: SEQOUT.write('>%s\n%s\n' % (name,sequence)); fasx += 1
+                if reformat == 'degap':
+                    SEQOUT.write('>%s\n%s\n' % (name, string.replace(sequence,'-','')))
+                    fasx += 1
+                elif reformat[:3] in ['fas']: SEQOUT.write('>%s\n%s\n' % (name,sequence)); fasx += 1
                 elif reformat == 'peptides':
                     sequence = string.replace(sequence,'-','')
                     if sequence: SEQOUT.write('%s\n' % (sequence)); fasx += 1
@@ -3218,6 +3233,56 @@ class SeqList(rje_obj.RJE_Object):
                 self.printLog('#SAMPLE','%s file(s) of %s sequences output to %s.r*.fas' % (self.list['Sampler'][1],rje.iStr(self.list['Sampler'][0]),seqout))
             else: self.printLog('#SAMPLE','%s sequences output to %s.' % (rje.iStr(self.list['Sampler'][0]),rfile))
         except: self.errorLog("Problem with SeqList.sampler()"); raise
+#########################################################################################################################
+    def contigsTable(self,save=True):   ### Generate table of contig positions (SeqName, Start, End)
+        '''
+        Generate table of contig positions (SeqName, Start, End, CtgLen)
+        >> save:bool [True] = Whether to save table to *.contigs.tdt
+        '''
+        try:### ~ [0] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            if not self.obj['DB']: self.obj['DB'] = rje_db.Database(self.log, self.cmd_list + ['tuplekeys=T'])
+            db = self.db()
+            gapdb = self.db('gaps') # ['seqname', 'start', 'end', 'seqlen', 'gaplen'], ['seqname', 'start', 'end']
+            #self.debug(gapdb)
+            #self.debug(gapdb.fields())
+            cdb = db.addEmptyTable('contigs',['seqname', 'start', 'end','ctglen'],['seqname', 'start', 'end'],log=True)
+            ### ~ [1] Extract Flanks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            entry = None
+            entries = gapdb.entries(sorted=True)
+            while entries:
+                prev = entry
+                entry = entries.pop(0)
+                if prev and entry['seqname'] != prev['seqname']:
+                    centry = {'seqname':prev['seqname'],'start':prev['end']+1,'end':prev['seqlen']}
+                    centry['ctglen'] = centry['end'] - centry['start'] + 1
+                    cdb.addEntry(centry)
+                #i# Start of sequence contig
+                if not prev or prev['seqname'] != entry['seqname']:
+                    centry = {'seqname':entry['seqname'],'start':1,'end':entry['start'] - 1}
+                    centry['ctglen'] = centry['end'] - centry['start'] + 1
+                    cdb.addEntry(centry)
+                #i# Middle of sequence contig
+                else:
+                    centry = {'seqname':entry['seqname'],'start':prev['end']+1,'end':entry['start'] - 1}
+                    centry['ctglen'] = centry['start'] - centry['start'] + 1
+                    cdb.addEntry(centry)
+                    #self.bugPrint('-> Mid contig: %s' % (cdb.entrySummary(centry,collapse=True)))
+            prev = entry
+            if prev:
+                centry = {'seqname':prev['seqname'],'start':prev['end']+1,'end':prev['seqlen']}
+                centry['ctglen'] = centry['end'] - centry['start'] + 1
+                cdb.addEntry(centry)
+
+            #i# Add sequences without gaps to flanks and contigs
+            sx = 0
+            for seq in self.seqs():
+                seqname = self.shortName(seq)
+                if seqname not in gapdb.index('seqname'):
+                    seqlen = self.seqLen(seq)
+                    centry = {'seqname':seqname,'start':1,'end':seqlen,'ctglen':seqlen}
+                    cdb.addEntry(centry); sx += 1
+            cdb.saveToFile()
+        except: self.errorLog("Problem with SeqList.contigsTable()")
 #########################################################################################################################
      ### <6> ### Menu-based Sequence Editing                                                                            #
 #########################################################################################################################

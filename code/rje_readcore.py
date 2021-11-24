@@ -19,8 +19,8 @@
 """
 Module:       rje_readcore
 Description:  Read mapping and analysis core module
-Version:      0.4.0
-Last Edit:    07/10/21
+Version:      0.6.0
+Last Edit:    11/11/21
 Copyright (C) 2021  Richard J. Edwards - See source code for GNU License Notice
 
 Function:
@@ -49,10 +49,11 @@ Commandline:
     quickdepth=T/F  : Whether to use samtools depth in place of mpileup (quicker but underestimates?) [False]
     depfile=FILE    : Precomputed depth file (*.fastdep or *.fastmp) to use [None]
     regfile=FILE    : File of SeqName, Start, End positions (or GFF) for read coverage checking [None]
-    checkfields=LIST: Fields in checkpos file to give Locus, Start and End for checking [Hit,SbjStart,SbjEnd]
+    checkfields=LIST: Fields in checkpos file to give Locus, Start and End for checking [SeqName,Start,End]
     gfftype=LIST    : Optional feature types to use if performing regcheck on GFF file (e.g. gene) ['gene']
     depadjust=INT   : Advanced R density bandwidth adjustment parameter [12]
     seqstats=T/F    : Whether to output CN and depth data for full sequences as well as BUSCO genes [False]
+    cnmax=INT       : Max. y-axis value for CN plot (and mode multiplier for related depth plots) [4]
     ### ~ System options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
     forks=X         : Number of parallel sequences to process at once [0]
     killforks=X     : Number of seconds of no activity before killing all remaining forks. [36000]
@@ -84,6 +85,12 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     # 0.3.0 - Add benchmark=T/F option to the genome size prediction. Tidied CovBase and MapAdjust.
     # 0.3.1 - Tweaked some input checks and log output. Replaced indelratio sort -u with uniq for speed and memory.
     # 0.4.0 - Added seqstats=T/F : Whether to output CN and depth data for full sequences as well as BUSCO genes [False]
+    # 0.4.1 - Fixed bug that causes clashes with v5 full_table.bed files.
+    # 0.5.0 - Add additional map adjustment variants:
+    #       - MapAdjust2 = allbases, not covbases
+    #       - MapBases = Use map bases, not covbases for min read volumne
+    #       - MapRatio = Use mapbases adjusted by indelratio
+    # 0.6.0 - Added support for multiple regfiles and setting max limit for CN graphics.
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -96,12 +103,13 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
     # [ ] : Add to SLiMSuite or SeqSuite.
     # [ ] : Add module load if cannot find program.
     # [ ] : Add NGMLR to mappers.
-    # [ ] : Try using total sequence length not covbases (samtools coverage $3 not $5) for CovBases calculation.
+    # [Y] : Try using total sequence length not covbases (samtools coverage $3 not $5) for CovBases calculation.
+    # [ ] : Add bamcsi=T/F : Use CSI indexing for BAM files, not BAI (needed for v long scaffolds) [False]
     '''
 #########################################################################################################################
 def makeInfo(): ### Makes Info object which stores program details, mainly for initial print to screen.
     '''Makes Info object which stores program details, mainly for initial print to screen.'''
-    (program, version, last_edit, copy_right) = ('ReadMap', '0.4.0', 'October 2021', '2021')
+    (program, version, last_edit, copy_right) = ('ReadMap', '0.6.0', 'November 2021', '2021')
     description = 'Read mapping analysis module'
     author = 'Dr Richard J. Edwards.'
     comments = ['This program is still in development and has not been published.',rje_obj.zen()]
@@ -182,6 +190,7 @@ class ReadCore(rje_obj.RJE_Object):
 
     Int:integer
     - Adjust=INT   : Advanced R density bandwidth adjustment parameter [12]
+    - CNMax=INT       : Max. y-axis value for CN plot (and mode multiplier for related depth plots) [4]
 
     Num:float
     - SCDepth=NUM     : Single copy ("diploid") read depth. If zero, will use SC BUSCO mode [0]
@@ -189,7 +198,7 @@ class ReadCore(rje_obj.RJE_Object):
     File:file handles with matching str filenames
     
     List:list
-    - CheckFields=LIST: Fields in checkpos file to give Locus, Start and End for checking [Hit,SbjStart,SbjEnd]
+    - CheckFields=LIST: Fields in checkpos file to give Locus, Start and End for checking [SeqName,Start,End]
     - GFFType=LIST    : Optional feature types to use if performing regcheck on GFF file (e.g. gene) ['gene']
     - Reads=FILELIST  : List of fasta/fastq files containing reads. Wildcard allowed. Can be gzipped. []
     - ReadType=LIST   : List of ont/pb/hifi file types matching reads for minimap2 mapping [ont]
@@ -209,7 +218,7 @@ class ReadCore(rje_obj.RJE_Object):
         ### ~ Basics ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         self.strlist = ['BAM','BUSCO','DepFile','PAF','RegFile','SeqIn','TmpDir']
         self.boollist = ['QuickDepth','SeqStats']
-        self.intlist = ['Adjust']
+        self.intlist = ['Adjust','CNMax']
         self.numlist = ['SCDepth']
         self.filelist = []
         self.listlist = ['CheckFields','GFFType','Reads','ReadType']
@@ -232,8 +241,8 @@ class ReadCore(rje_obj.RJE_Object):
         self.setStr({'BAM':'None','BUSCO':'None','DepFile':'None','PAF':'None','RegFile':'None','SeqIn':'None','TmpDir':'./tmpdir/',
                      'Minimap2':'minimap2','Samtools':'samtools'})
         self.setBool({'QuickDepth':False,'SeqStats':False})
-        self.setInt({'Adjust':12})
-        self.setNum({'CovBases':0,'MapAjust':0,'SCDepth':0})
+        self.setInt({'Adjust':12,'CNMax':4})
+        self.setNum({'AllBases':0,'CovBases':0,'MapAjust':0,'MapBases':0,'OldAdjust':0,'SCDepth':0})
         self.list['CheckFields'] = ['SeqName','Start','End']
         self.list['GFFType'] = ['gene']
         self.list['Reads'] = []
@@ -251,13 +260,16 @@ class ReadCore(rje_obj.RJE_Object):
         '''
         ### Class Options (No need for arg if arg = att.lower()) ###
         self._cmdReadList(cmd,'path',['TmpDir'])  # String representing directory path
-        self._cmdReadList(cmd,'file',['BAM','BUSCO','DepFile','PAF','RegFile','SeqIn'])  # String representing file path
+        self._cmdReadList(cmd,'str',['RegFile'])  # String representing directory path
+        self._cmdReadList(cmd,'file',['BAM','BUSCO','DepFile','PAF','SeqIn'])  # String representing file path
         self._cmdReadList(cmd,'bool',['QuickDepth','SeqStats','Minimap2','Samtools','Rscript'])
+        self._cmdReadList(cmd,'int',['Adjust','CNMax'])
         self._cmdReadList(cmd,'num',['SCDepth'])
         self._cmdReadList(cmd,'glist',['Reads'])
         self._cmdReadList(cmd,'list',['CheckFields','GFFType','ReadType'])
         self._cmdRead(cmd,'int','Adjust','depadjust')   # Integers
         self._cmdRead(cmd,type='str',att='RegFile',arg='regcheck')  # No need for arg if arg = att.lower()
+        self._cmdRead(cmd,type='list',att='CheckFields',arg='reghead')  # No need for arg if arg = att.lower()
 #########################################################################################################################
     def _cmdList(self):     ### Sets Attributes from commandline
         '''
@@ -470,7 +482,7 @@ class ReadCore(rje_obj.RJE_Object):
                         self.printLog('#SYS',forkcmd)
                         os.system(forkcmd)
                 elif forker.run():
-                    self.printLog('#FORK','Forking of depth trim analysis completed.')
+                    self.printLog('#FORK','Forking of depth parsing completed.')
                 else:
                     try:
                         self.errorLog('Depth forking did not complete',printerror=False,quitchoice=True)
@@ -557,16 +569,17 @@ class ReadCore(rje_obj.RJE_Object):
                 raise IOError('BUSCO file not given (busco=FILE)')
             ### ~ [3] Check RegFile ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             if self.getStrLC('RegFile'):
-                rje.checkForFiles([self.getStr('RegFile')],basename='',log=self.log,ioerror=True)
+                regfilename = string.split(string.split(self.getStr('RegFile'),',')[0],':')[-1]
+                rje.checkForFiles([regfilename],basename='',log=self.log,ioerror=True)
                 ## ~ [3a] Check Fields ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
-                if self.getStrLC('RegFile').endswith('.gff') or self.getStrLC('RegFile').endswith('.gff3'):
+                if regfilename.endswith('.gff') or regfilename.endswith('.gff3'):
                     self.printLog('#GFF','GFF file recognised for RegFile')
                 else:
                     #!# Add feature to recognise and change first field if not given #!#
                     if not len(self.list['CheckFields']) == 3:
                         raise ValueError('checkfields=LIST must have exactly 3 elements: SeqName, Start, End. %d found!' % len(self.list['CheckFields']))
                     [locusfield,startfield,endfield] = self.list['CheckFields']
-                    cdb = db.addTable(self.getStr('RegFile'),mainkeys='auto',name='check',expect=True)
+                    cdb = db.addTable(regfilename,mainkeys='auto',name='check',expect=True)
                     if not cdb: raise IOError('Cannot find checkpos file "%s"' % self.getStr('CheckPos'))
                     if locusfield not in cdb.fields():
                         self.warnLog('Field "%s" not found in checkpos file: will use "%s for sequence name' % (locusfield,cdb.fields()[0]))
@@ -810,6 +823,7 @@ class ReadCore(rje_obj.RJE_Object):
                 bamlist.append(mapfile)
             ### ~ [3] ~ Merge individual Map files ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             if paf:
+                paffile = outfile
                 if len(bamlist) > 1:
                     bammerge = 'cat {0} > {1}'.format(' '.join(bamlist), paffile)
                     logline = self.loggedSysCall(bammerge, append=True)
@@ -898,6 +912,8 @@ class ReadCore(rje_obj.RJE_Object):
                 if not self.getBool('Samtools'): raise IOError('Cannot find samtools')
                 if not self.checkInput(busco=True): raise IOError('No busco=FILE table')
                 bedfile = rje.baseFile(self.getStr('BUSCO'),strip_path=True) + '.bed'
+                if bedfile == 'full_table.bed':
+                    bedfile = self.baseFile() + '.full_table.bed'
                 if self.force() or not rje.checkForFiles([bedfile],log=self.log):
                     os.system('grep Complete %s | awk \'{print $3"\t"$4"\t"$5;}\' > %s' % (self.getStr('BUSCO'),bedfile))
                     if rje.exists(bedfile):
@@ -987,16 +1003,19 @@ class ReadCore(rje_obj.RJE_Object):
             return readbp
         except: self.errorLog('%s.baseCount error' % self.prog())
 #########################################################################################################################
-    def covBases(self): ### Partial mapadjust calcuation just calculating covbases.
+    def covBases(self): ### Partial mapadjust calculation just calculating covbases.
         '''
         Partial mapadjust calcuation just calculating covbases.
+        >> allbases:bool [False] = Whether to use all bases, not just covered bases, for calculation.
         << covbases:num = Covbases portion of mapajdust ratio.
         '''
         try:### ~ [1] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             if self.getNum('CovBases'): return self.getNum('CovBases')
             bamfile = self.getBAMFile()
-            ### ~ [2] CovBases Total Sequencing Bases ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             ratiofile = bamfile + '.mapratio.txt'
+            if self.force() or not rje.exists(ratiofile) or not open(ratiofile, 'r').readline().split()[0]:
+                ratiofile = bamfile + '.covbases.txt'
+            ### ~ [2] CovBases Total Sequencing Bases ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             if self.force() or not rje.exists(ratiofile) or not open(ratiofile,'r').readline().split()[0]:
                 if not self.getBool('Samtools'): raise IOError
                 self.printLog('\r#ADJUST', 'Calculating CovBases adjustment (samtools coverage)...')
@@ -1011,31 +1030,81 @@ class ReadCore(rje_obj.RJE_Object):
             return covbases
         except: self.errorLog('%s.covBases error' % self.prog()); raise
 #########################################################################################################################
-    def mapAdjust(self):    ### Legacy read mapping adjustment method
+    def allBases(self): ### Partial mapadjust calculation just calculating improved covbases.
+        '''
+        Partial mapadjust calcuation just calculating covbases.
+        << covbases:num = Covbases portion of mapajdust ratio.
+        '''
+        try:### ~ [1] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            if self.getNum('AllBases'): return self.getNum('AllBases')
+            bamfile = self.getBAMFile()
+            ### ~ [2] CovBases Total Sequencing Bases ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            ratiofile = bamfile + '.allbases.txt'
+            if self.force() or not rje.exists(ratiofile) or not open(ratiofile,'r').readline().split()[0]:
+                if not self.getBool('Samtools'): raise IOError
+                self.printLog('\r#ADJUST', 'Calculating CovBases adjustment (samtools coverage)...')
+                covbases = float(os.popen("samtools coverage {0} | grep -v coverage | awk  '{{sum += ($7 * ($3 - $2 + 1))}} END {{print sum}}'".format(bamfile)).read().split()[0])
+                open(ratiofile,'w').write('{0}\n'.format(covbases))
+            else:
+                self.printLog('\r#ADJUST','Use coverage data from from {0} (force=F)'.format(ratiofile))
+                ratio = open(ratiofile, 'r').read().split()
+                covbases = float(ratio[0])
+            self.printLog('\r#ADJUST','Reference base read coverage: {0}'.format(rje.iStr(int(covbases))))
+            self.setNum({'AllBases': covbases})
+            return covbases
+        except: self.errorLog('%s.allBases error' % self.prog()); raise
+#########################################################################################################################
+    def mapBases(self): ### Partial mapadjust calculation just calculating mapbases.
+        '''
+        Partial mapadjust calcuation just calculating mapbases.
+        << mapbases:num = Mapbases portion of mapajdust ratio.
+        '''
+        try:### ~ [1] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            if self.getNum('MapBases'): return self.getNum('MapBases')
+            bamfile = self.getBAMFile()
+            spliti = 1
+            ratiofile = bamfile + '.mapratio.txt'
+            if self.force() or not rje.exists(ratiofile) or not open(ratiofile, 'r').readline().split()[0]:
+                ratiofile = bamfile + '.mapbases.txt'
+                spliti = 0
+            ### ~ [2] MapBases Total Sequencing Bases ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            if self.force() or not rje.exists(ratiofile) or not open(ratiofile,'r').readline().split()[0]:
+                if not self.getBool('Samtools'): raise IOError
+                self.printLog('\r#ADJUST', 'Calculating MapAdjust ratio (samtools fasta)...')
+                mapbases = float(os.popen("samtools view -hb -F 4 {0} | samtools fasta - | grep -v '^>' | wc | awk '{{ $4 = $3 - $2 }} 1' | awk '{{print $4}}'".format(bamfile)).read().split()[0])
+                open(ratiofile,'w').write('{0}\n'.format(mapbases))
+            else:
+                self.printLog('\r#ADJUST','Use coverage data from from {0} (force=F)'.format(ratiofile))
+                ratio = open(ratiofile, 'r').read().split()
+                mapbases = float(ratio[spliti])
+            self.printLog('\r#ADJUST','Mapped read bases: {0}'.format(rje.iStr(int(mapbases))))
+            self.setNum({'MapBases': mapbases})
+            return mapbases
+        except: self.errorLog('%s.mapBases error' % self.prog()); raise
+#########################################################################################################################
+    def mapAdjust(self,allbases=True):    ### Legacy read mapping adjustment method
         '''
         Legacy read mapping adjustment method.
+        >> allbases:bool [True] = Whether to use
         << readbp:num = Legacy mapadjust ratio.
         '''
         try:### ~ [1] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             if self.getNum('MapAdjust'): return self.getNum('MapAdjust')
             bamfile = self.getBAMFile()
-            covbases = self.covBases()
-            ### ~ [2] MapAdjust Total Sequencing Bases ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            ratiofile = bamfile + '.mapratio.txt'
-            if self.force() or not rje.exists(ratiofile) or not len(open(ratiofile,'r').readline().split()) > 1:
-                if not self.getBool('Samtools'): raise IOError
-                self.printLog('\r#ADJUST', 'Calculating Mapadjust ratio (samtools fasta)...')
-                mapbases = float(os.popen("samtools view -hb -F 4 {0} | samtools fasta - | grep -v '^>' | wc | awk '{{ $4 = $3 - $2 }} 1' | awk '{{print $4}}'".format(bamfile)).read().split()[0])
-                open(ratiofile,'w').write('{0} {1}\n'.format(covbases,mapbases))
+            if allbases:
+                covbases = self.allBases()
             else:
-                self.printLog('\r#ADJUST','Use coverage:mapped ratio from {0} (force=F)'.format(ratiofile))
-                ratio = open(ratiofile, 'r').read().split()
-                mapbases = float(ratio[1])
-            self.printLog('#ADJUST','Mapped read bases: {0}'.format(rje.iStr(int(mapbases))))
+                covbases = self.covBases()
+            mapbases = self.mapBases()
+            ### ~ [2] MapAdjust Total Sequencing Bases ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             if not covbases or not mapbases: raise ValueError('Cannot have zero values for mapadjust. Something has gone wrong!')
             mapadjust = covbases / mapbases
-            self.printLog('#ADJUST', 'Mapadjust ratio: {0:.3f}'.format(mapadjust))
-            self.setNum({'MapAdjust':mapadjust})
+            if allbases:
+                self.printLog('#ADJUST', 'MapAdjust ratio: {0:.3f}'.format(mapadjust))
+                self.setNum({'MapAdjust':mapadjust})
+            else:
+                self.printLog('#ADJUST', 'OldAdjust ratio: {0:.3f}'.format(mapadjust))
+                self.setNum({'OldAdjust':mapadjust})
             return mapadjust
         except: self.errorLog('%s.mapAdjust error' % self.prog()); raise
 #########################################################################################################################
@@ -1066,7 +1135,7 @@ class ReadCore(rje_obj.RJE_Object):
         '''
         try:### ~ [1] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             options = ['pngdir={0}.plots'.format(self.baseFile())]
-            if not cmds: cmds = ['depfile','busco','scdepth','regfile','gfftype','winsize','winstep','adjust','basefile']
+            if not cmds: cmds = ['depfile','busco','scdepth','regfile','gfftype','winsize','winstep','adjust','cnmax','basefile']
             for cmd in cmds:
                 val =  self.getData(cmd)
                 if val and val != 'None':
@@ -1119,22 +1188,30 @@ class ReadCore(rje_obj.RJE_Object):
         '''
         try:### ~ [0] Set up ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             self.headLog('Calculate Genome Size', line='-')
+            readbp = self.baseCount()
             if adjust == 'None': adjust = None
             gdb = self.db('gensize')
             if not gdb: gdb = self.db().addEmptyTable('gensize',['SeqFile','DepMethod','Adjust','ReadBP','MapAdjust','SCDepth','EstGenomeSize'],['SeqFile','DepMethod','Adjust'])
             depmethod = 'mpileup'
             if self.getBool('QuickDepth'): depmethod = 'depth'
-            adjustments = [None,'IndelRatio','MapAdjust','CovBases']
+            adjustments = [None,'IndelRatio','MapAdjust','MapRatio','CovBases','OldAdjust','AllBases','MapBases','OldCovBases']
+            if self.getNum('IndelRatio') and self.getNum('MapBases'):
+                mapadjust = self.getNum('MapBases') / self.getNum('IndelRatio')
+                self.setNum({'MapRatio':mapadjust})
+                self.printLog('#ADJUST', 'MapRatio mapping and indel adjustment: {0} -> {1}'.format(dnaLen(readbp),dnaLen(mapadjust)))
+            if self.getNum('CovBases') and self.getNum('MapBases'):
+                mapadjust = self.getNum('CovBases') / self.getNum('MapBases')
+                self.setNum({'OldAdjust':mapadjust})
+                self.printLog('#ADJUST', 'OldAdjust MapRatio: {0:.3f}'.format(mapadjust))
             if benchmark:
                 adjustments += ['Assembly','MeanX']
                 seqin = self.seqinObj()
                 seqlen = 0
                 for seq in seqin.seqs():
                     seqlen += seqin.seqLen(seq)
-                self.setNum({'Assembly':seqlen,'MeanX':self.getNum('CovBases')/float(seqlen)})
+                self.setNum({'Assembly':seqlen,'MeanX':self.getNum('AllBases')/float(seqlen)})
             if not save: adjustments = [adjust]
             scdepth = self.getSCDepth()
-            readbp = self.baseCount()
             ### ~ [1] Calculate genome size ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             for nkey in adjustments:
                 if nkey and not self.getNum(nkey): continue
@@ -1143,7 +1220,7 @@ class ReadCore(rje_obj.RJE_Object):
                 if nkey:
                     mapadjust = self.getNum(nkey)
                     desc = nkey
-                if nkey == 'CovBases':
+                if nkey in ['CovBases','AllBases','MapBases','MapRatio']:
                     adjreadbp = mapadjust
                     mapadjust = adjreadbp / readbp
                 elif nkey == 'IndelRatio':
@@ -1161,9 +1238,12 @@ class ReadCore(rje_obj.RJE_Object):
                     self.printLog('#READBP', 'Total base count ({0} adjusted): {1}'.format(nkey,rje.iStr(adjreadbp)))
                 estgensize = int(0.5+(float(adjreadbp) / scdepth))
                 scprint = rje.dp(scdepth, 2)
+                akey = nkey
+                if nkey == 'AllBases': akey = 'CovBases'
+                if nkey == 'CovBases': akey = 'OldCovBases'
                 self.printLog('#GSIZE','{0} ({1}) estimated genome size ({2} at {3}X): {4}'.format(desc,depmethod,rje_seqlist.dnaLen(adjreadbp,dp=0,sf=3),scprint,rje_seqlist.dnaLen(estgensize,dp=0,sf=4)))
                 gdb.addEntry({'SeqFile':os.path.basename(self.getStr('SeqIn')),'DepMethod':depmethod,
-                                  'Adjust':nkey,'ReadBP':readbp,'MapAdjust':mapadjust,
+                                  'Adjust':akey,'ReadBP':readbp,'MapAdjust':mapadjust,
                                   'SCDepth':scprint,'EstGenomeSize':estgensize})
                 if not nkey and not adjust:
                     self.setInt({'EstGenomeSize':estgensize})

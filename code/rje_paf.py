@@ -557,7 +557,7 @@ class PAF(rje_obj.RJE_Object):
                 if ifiltx: self.printLog('#FILT','%s PAF lines filtered with (Identity+nn)/(Length+nn) < minlocid=%.2f%%' % (rje.iStr(ifiltx),minlocid*100.0))
 
             ### ~ [3] Return PAF Data ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            if self.dev(): pafdb.saveToFile()
+            #if self.dev(): pafdb.saveToFile()
             return pafdb
         except: self.errorLog('%s.parsePAF error' % self.prog()); return False
 #########################################################################################################################

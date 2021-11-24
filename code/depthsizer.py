@@ -19,8 +19,8 @@
 """
 Module:       depthsizer
 Description:  Read-depth based genome size prediction
-Version:      1.4.1
-Last Edit:    11/10/21
+Version:      1.6.0
+Last Edit:    19/11/21
 Citation:     Chen SH et al. & Edwards RJ (preprint): bioRxiv 2021.06.02.444084 (doi: 10.1101/2021.06.02.444084)
 Copyright (C) 2021  Richard J. Edwards - See source code for GNU License Notice
 
@@ -48,9 +48,9 @@ Function:
     and the `Contig`, `Start` and `End` fields are used to define the regions that should be predominantly single copy.
     Output from BUSCOMP is also compatible with DepthSizer.
 
-    **NOTE:** The current genome size prediction appears to be an over-estimate. There is currently no adjustment for
-    contamination. The `mapadjust` option attemtps to correct for read mapping and imbalanced insertion:deletion ratios
-    etc. but has not been extensively tested.
+    **NOTE:** The current unadjusted genome size prediction appears to be an over-estimate. Please see documentation for
+    more details of attempts to correct for contamination, read mapping and/or imbalanced insertion:deletion ratios
+    etc.
 
     ---
 
@@ -80,7 +80,7 @@ Commandline:
     ### ~ Genome size prediction options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
     busco=TSVFILE   : BUSCO full table [full_table_$BASEFILE.busco.tsv]
     readbp=INT      : Total combined read length for depth calculations (over-rides reads=FILELIST) []
-    adjustmode=X    : Map adjustment method to apply (None/CovBases/IndelRatio/MapAdjust) [IndelRatio]
+    adjustmode=X    : Map adjustment method to apply (None/CovBases/IndelRatio/MapBases/MapAdjust/MapRatio/OldAdjust/OldCovBases) [IndelRatio]
     quickdepth=T/F  : Whether to use samtools depth in place of mpileup (quicker but underestimates?) [False]
     covbases=T/F    : Whether to calculate predicted minimum genome size based on mapped reads only [True]
     mapadjust=T/F   : Whether to calculate mapadjust predicted genome size based on read length:mapping ratio [False]
@@ -104,7 +104,6 @@ slimsuitepath = os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__
 sys.path.append(os.path.join(slimsuitepath,'libraries/'))
 sys.path.append(os.path.join(slimsuitepath,'tools/'))
 ### User modules - remember to add *.__doc__ to cmdHelp() below ###
-import diploidocus
 import rje, rje_obj, rje_rmd, rje_readcore, rje_seqlist
 #########################################################################################################################
 def history():  ### Program History - only a method for PythonWin collapsing! ###
@@ -118,6 +117,12 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     # 1.3.1 - Tweaked some input checks and log output. Replaced indelratio sort -u with uniq for speed and memory.
     # 1.4.0 - Added seqstats=T/F : Whether to output CN and depth data for full sequences as well as BUSCO genes [False]
     # 1.4.1 - Added citation and fixed minor output typo.
+    # 1.4.2 - Fixed bug that causes clashes with v5 full_table.bed files.
+    # 1.5.0 - Add additional map adjustment variants:
+    #       - MapAdjust2 = allbases, not covbases
+    #       - MapBases = Use map bases, not covbases for min read volumne
+    #       - MapRatio = Use mapbases adjusted by indelratio
+    # 1.6.0 - Disable legacy mode using Diploidocus.
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -137,10 +142,10 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
 #########################################################################################################################
 def makeInfo(): ### Makes Info object which stores program details, mainly for initial print to screen.
     '''Makes Info object which stores program details, mainly for initial print to screen.'''
-    (program, version, last_edit, copy_right) = ('DepthSizer', '1.4.1', 'October 2021', '2021')
+    (program, version, last_edit, copy_right) = ('DepthSizer', '1.6.0', 'November 2021', '2021')
     description = 'Read-depth based genome size prediction'
     author = 'Dr Richard J. Edwards.'
-    comments = ['This program is still in development and has not been published.',rje_obj.zen()]
+    comments = ['Please raise bugs or questions at https://github.com/slimsuite/depthsizer.',rje_obj.zen()]
     return rje.Info(program,version,last_edit,description,author,time.time(),copy_right,comments)
 #########################################################################################################################
 def cmdHelp(info=None,out=None,cmd_list=[]):   ### Prints *.__doc__ and asks for more sys.argv commands
@@ -318,9 +323,9 @@ class DepthSizer(rje_readcore.ReadCore):
 
         DepthSizer is still under review as part of the Waratah genome paper. For now, please cite the preprint:
 
-        > Chen SH, Rossetto M, van der Merwe M, Lu-Irving P, Yap JS, Sauquet H, Bourke G, Bragg JG & Edwards RJ (preprint):
+        > Chen SH, Rossetto M, van der Merwe M, Lu-Irving P, Yap JS, Sauquet H, Bourke G, Amos TG, Bragg JG & Edwards RJ (preprint):
         Chromosome-level de novo genome assembly of Telopea speciosissima (New South Wales waratah) using long-reads,
-        linked-reads and Hi-C. [bioRxiv 2021.06.02.444084](https://www.biorxiv.org/content/10.1101/2021.06.02.444084v1.full);
+        linked-reads and Hi-C. [bioRxiv 2021.06.02.444084](https://www.biorxiv.org/content/10.1101/2021.06.02.444084v2.full);
         doi: 10.1101/2021.06.02.444084.
 
         ---
@@ -368,7 +373,7 @@ class DepthSizer(rje_readcore.ReadCore):
         ### ~ Genome size prediction options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         busco=TSVFILE   : BUSCO full table [full_table_$BASEFILE.busco.tsv]
         readbp=INT      : Total combined read length for depth calculations (over-rides reads=FILELIST) []
-        adjustmode=X    : Map adjustment method to apply (None/CovBases/IndelRatio/MapAdjust) [IndelRatio]
+        adjustmode=X    : Map adjustment method to apply (None/CovBases/IndelRatio/MapBases/MapAdjust/MapRatio/OldAdjust/OldCovBases) [IndelRatio]
         quickdepth=T/F  : Whether to use samtools depth in place of mpileup (quicker but underestimates?) [False]
         covbases=T/F    : Whether to calculate predicted minimum genome size based on mapped reads only [True]
         mapadjust=T/F   : Whether to calculate mapadjust predicted genome size based on read length:mapping ratio [False]
@@ -471,13 +476,16 @@ class DepthSizer(rje_readcore.ReadCore):
         a multiplier for the total read volume. Extreme mapadjust ratios should be treated with caution and
         may indicate problems with the assembly and/or source data.
         * `Assembly` : In `benchmark=T` mode, the observed assembly size is output.
-        * `MeanX` : In `benchmark=T` mode, the mean coverage is calculated a `CovBases`/`AssemblySize` and used in place
+        * `MeanX` : In `benchmark=T` mode, the mean coverage is calculated as `CovBases`/`AssemblySize` and used in place
         of `scdepth` for the genome size estimation using the full sequencing volume.
 
         By default, DepthSizer will estimate genome sizes using `IndelRatio`, `CovBases` in addition to `None`. For
         speed, `CovBases` can be switched off with `covbases=F` and `IndelRatio` by setting `adjustmode=None`. The old
         `MapAdjust` calculation is not made by default, but can be switched on with `mapadjust=T`, `adjustmode=MapAdjust`,
         or `benchmark=T`. Setting `benchmark=T` will output all six estimates.
+
+        **NOTE:** v1.5.0 expands the options to None/CovBases/IndelRatio/MapBases/MapAdjust/MapRatio/OldAdjust/OldCovBases.
+        Details to follow.
 
         ## Step 5: Total read volume
 
@@ -577,19 +585,26 @@ class DepthSizer(rje_readcore.ReadCore):
             if not self.checkInput(busco=self.getNum('SCDepth')<=0,reads=self.getNum('ReadBP')<=0): return False
             self.seqinObj(summarise=True)
             ### ~ [2] Calculate key stats ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            #i# v1.5.0 => None/CovBases/IndelRatio/MapBases/MapAdjust/MapRatio/OldAdjust/OldCovBases
             self.headLog('Calculate Single-Copy Read Depth', line='-')
             if not self.getSCDepth():     # This will generate the BAM file and depfile if needed
                 self.printLog('#DEPTH','Cannot calculate genome size without single copy read depth')
                 return False
             ## ~ [2a] IndelRatio ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
-            if self.getBool('Benchmark') or self.getStrLC('AdjustMode') == 'indelratio':
+            if self.getBool('Benchmark') or self.getStrLC('AdjustMode') in ['indelratio','mapratio']:
                 self.indelRatio()  # Calculate with and without indel ratio correction
             ## ~ [2b] CovBases ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
             if self.getBool('Benchmark') or self.getBool('CovBases') or self.getStrLC('AdjustMode') == 'covbases':
+                self.allBases()
+            if self.getBool('Benchmark') or self.getStrLC('AdjustMode') == 'oldcovbases':
                 self.covBases()
+            if self.getBool('Benchmark') or self.getStrLC('AdjustMode') in ['mapbases','mapratio']:
+                self.mapBases()
             ## ~ [2c] MapAdjust ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
             if self.getBool('Benchmark') or self.getBool('MapAdjust') or self.getStrLC('AdjustMode') == 'mapadjust':
                 self.mapAdjust()
+            if self.getBool('Benchmark') or self.getStrLC('AdjustMode') == 'oldmapadjust':
+                self.mapAdjust(allbases=False)
             ### ~ [3] Genome size prediction and output ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             gensize = self.calculateGenomeSize(self.getStr('AdjustMode'),benchmark=self.getBool('Benchmark'))
             gdb = self.db('gensize')
@@ -613,18 +628,7 @@ class DepthSizer(rje_readcore.ReadCore):
         Legacy DepthSize method, using Diploidocus.
         '''
         try:### ~ [1] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            dipobj = diploidocus.Diploidocus(self.log,['dna=T','summarise=T','mapadjust=T']+self.cmd_list+['runmode=gensize','diploidocus=F'])
-            if not dipobj.getStrLC('SeqIn'):
-                raise ValueError('seqin=FILE must be set')
-            if not rje.exists(dipobj.getStr('SeqIn')):
-                self.errorLog('seqin=FILE "{0}" not found!',format(dipobj.getStr('SeqIn')),printerror=False)
-                raise IOError()
-            if not dipobj.setup(): return False
-            self.baseFile(dipobj.baseFile())
-            ### ~ [2] ~ Add main run code here ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            dipobj.seqinObj(summarise=False)
-            dipobj.genomeSize(makebam=True)
-            dipobj.db('gensize').saveToFile(append=self.getBool('Append'))
+            self.infoLog('Legacy mode disabled: run Diploidocus gensize mode with legacy=T')
         except:
             self.errorLog(self.zen())
             raise   # Delete this if method error not terrible

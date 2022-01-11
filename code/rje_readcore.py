@@ -19,8 +19,8 @@
 """
 Module:       rje_readcore
 Description:  Read mapping and analysis core module
-Version:      0.6.0
-Last Edit:    11/11/21
+Version:      0.7.1
+Last Edit:    10/01/22
 Copyright (C) 2021  Richard J. Edwards - See source code for GNU License Notice
 
 Function:
@@ -91,6 +91,8 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     #       - MapBases = Use map bases, not covbases for min read volumne
     #       - MapRatio = Use mapbases adjusted by indelratio
     # 0.6.0 - Added support for multiple regfiles and setting max limit for CN graphics.
+    # 0.7.0 - Added passing on of gfftype=LIST option to Rscript.
+    # 0.7.1 - Fixed readtype recycle bug.
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -109,7 +111,7 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
 #########################################################################################################################
 def makeInfo(): ### Makes Info object which stores program details, mainly for initial print to screen.
     '''Makes Info object which stores program details, mainly for initial print to screen.'''
-    (program, version, last_edit, copy_right) = ('ReadMap', '0.6.0', 'November 2021', '2021')
+    (program, version, last_edit, copy_right) = ('ReadMap', '0.7.1', 'January 2022', '2021')
     description = 'Read mapping analysis module'
     author = 'Dr Richard J. Edwards.'
     comments = ['This program is still in development and has not been published.',rje_obj.zen()]
@@ -742,7 +744,7 @@ class ReadCore(rje_obj.RJE_Object):
                 self.list['ReadType'] = ['ont'] * len(self.list['Reads'])
             elif len(self.list['ReadType']) == 1 and len(self.list['Reads']) != 1:
                 self.printLog('#READS','Using "%s" as read type for all long reads' % self.list['ReadType'][0])
-                self.list['ReadType'] = self.list['ReadType'][0] * len(self.list['Reads'])
+                self.list['ReadType'] = [self.list['ReadType'][0]] * len(self.list['Reads'])
             elif len(self.list['ReadType']) > len(self.list['Reads']):
                 self.warnLog('reads=FILELIST < readtype=LIST length mismatch: will truncate readtype=LIST.')
                 self.list['ReadType'] = self.list['ReadType'][:len(self.list['Reads'])]
@@ -1140,6 +1142,9 @@ class ReadCore(rje_obj.RJE_Object):
                 val =  self.getData(cmd)
                 if val and val != 'None':
                     options.append('{0}={1}'.format(cmd,val))
+            for lcmd in rje.sortKeys(self.list):
+                if lcmd.lower() in cmds:
+                    options.append('{0}={1}'.format(lcmd.lower(), ','.join(self.list[lcmd])))
             if self.debugging(): options.append('debug=TRUE')
             if self.getBool('SeqStats'): options.append('seqstats=TRUE')
             optionstr = ' '.join(options)

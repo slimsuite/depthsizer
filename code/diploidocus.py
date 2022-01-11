@@ -19,8 +19,8 @@
 """
 Module:       Diploidocus
 Description:  Diploid genome assembly analysis toolkit
-Version:      1.0.0
-Last Edit:    19/11/21
+Version:      1.1.1
+Last Edit:    06/01/22
 Nala Citation:  Edwards RJ et al. (2021), BMC Genomics [PMID: 33726677]
 DipNR Citation: Stuart KC, Edwards RJ et al. (preprint), bioRxiv 2021.04.07.438753; [doi: 10.1101/2021.04.07.438753]
 Tidy Citation:  Chen SH et al. & Edwards RJ (preprint), bioRxiv 2021.06.02.444084; [doi: 10.1101/2021.06.02.444084]
@@ -517,6 +517,9 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     # 0.17.2 - Stopped CSI indexing from crashing Diploidocus but not compatible with PurgeHaplotigs.
     # 0.18.0 - Implementation of density-based CNV estimation (dev=T).
     # 1.0.0 - Updated to use rje_kat and rje_readcore and made v1.0.0 in line with Stuart et al. publication.
+    # 1.0.1 - Bug fixes for GFF checkpos.
+    # 1.1.0 - Fixed TeloRev sequence for finding 3' telomeres. Add reporting of telomere lengths.
+    # 1.1.1 - Fixed DepthSizer object bug for DipCycle.
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -572,14 +575,17 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
     # [ ] : Replace PurgeHaplotigs so that CSI indexing is OK.
     # [ ] : Add DensK and DensDep statistics for each sequence, using new DepthCopy code.
     # [Y] : Update to Version 1.0.
+    # [ ] : Added auto-detection of regcheck=FILE and setting correct run mode if needed.
+    # [Y] : Check 3' recognition of Telomeres and telomere output positions.
     '''
 #########################################################################################################################
 def makeInfo(): ### Makes Info object which stores program details, mainly for initial print to screen.
     '''Makes Info object which stores program details, mainly for initial print to screen.'''
-    (program, version, last_edit, copy_right) = ('Diploidocus', '1.0.0', 'November 2021', '2017')
+    (program, version, last_edit, copy_right) = ('Diploidocus', '1.1.1', 'January 2022', '2017')
     description = 'Diploid genome assembly analysis toolkit.'
     author = 'Dr Richard J. Edwards.'
-    comments = ['Please raise bugs or questions at https://github.com/slimsuite/diploidocus.',
+    comments = ['Citation: Chen SH et al. & Edwards RJ (preprint): bioRxiv 2021.06.02.444084 (doi: 10.1101/2021.06.02.444084)',
+                'Please raise bugs or questions at https://github.com/slimsuite/diploidocus.',
                 'NOTE: telomere finding rules are based on https://github.com/JanaSperschneider/FindTelomeres',
                 rje_obj.zen()]
     return rje.Info(program,version,last_edit,description,author,time.time(),copy_right,comments)
@@ -659,7 +665,7 @@ class Diploidocus(rje_readcore.ReadCore,rje_kat.KAT):
     - SeqOut=FILE     : Output sequence assembly [$BASEFILE.fasta]
     - SpanID=X        : Generate sets of read IDs that span veccheck/regcheck regions, grouped by values of field X []
     - TeloFwd=X      : Basic telomere sequence for search [C{2,4}T{1,2}A{1,3}]
-    - TeloRev=X      : Basic telomere sequence for search [TTAGGG]
+    - TeloRev=X      : Basic telomere sequence for search [T{1,3}A{1,2}G{2,4}]
     - TmpDir=PATH     : Path for temporary output files during forking (not all modes) [./tmpdir/]
 
     Bool:boolean
@@ -754,7 +760,7 @@ class Diploidocus(rje_readcore.ReadCore,rje_kat.KAT):
         self._setDefaults(str='None',bool=False,int=0,num=0.0,obj=None,setlist=True,setdict=True,setfile=True)
         self._setReadCoreAttributes()   # See rje_readcore
         self._setKatAttributes()        # See rje_kat
-        self.setStr({'MaskMode':'partial','PurgeMode':'complex','RunMode':'diploidocus','ScreenMode':'report','TeloFwd':'C{2,4}T{1,2}A{1,3}','TeloRev':'','TmpDir':'./tmpdir/'})
+        self.setStr({'MaskMode':'partial','PurgeMode':'complex','RunMode':'diploidocus','ScreenMode':'report','TeloFwd':'C{2,4}T{1,2}A{1,3}','TeloRev':'T{1,3}A{1,2}G{2,4}','TmpDir':'./tmpdir/'})
         self.setBool({'DepDensity':True,'Diploidify':False,'DocHTML':False,'IncludeGaps':False,'KeepNames':False,
                       'Legacy':False,
                       'PreTrim':False,'QuickDepth':False,'RegCNV':True,'Summarise':True,'UseQSub':False,'ZeroAdjust':True,'10xTrim':False})
@@ -783,7 +789,7 @@ class Diploidocus(rje_readcore.ReadCore,rje_kat.KAT):
                 self._readCoreCmd(cmd)  # Will set all the core commands recognised.
                 self._katCmd(cmd)       # Set kat commands recognised.
                 ### Class Options (No need for arg if arg = att.lower()) ###
-                #self._cmdRead(cmd,type='str',att='Att',arg='Cmd')  # No need for arg if arg = att.lower()
+                self._cmdRead(cmd,type='file',att='ScreenDB',arg='vecscreen')  # No need for arg if arg = att.lower()
                 self._cmdReadList(cmd,'str',['GenomeSize','DebugStr','MaskMode','PurgeMode','RunMode','ScreenMode','SpanID','TeloFwd','TeloRev'])   # Normal strings
                 self._cmdReadList(cmd,'path',['TmpDir'])  # String representing directory path
                 self._cmdReadList(cmd,'file',['BAM','PAF','Parent1','Parent2','RegCheck','ScreenDB','SeqIn','SeqOut','BUSCO'])  # String representing file path
@@ -1158,6 +1164,8 @@ class Diploidocus(rje_readcore.ReadCore,rje_kat.KAT):
         * `*.telomeres.tdt`: Telomere prediction results
             - `Tel5` = Whether a 5' telomere is predicted
             - `Tel3` = Whether a 5' telomere is predicted
+            - `Tel5Len` = Length in window chunks of 5' telomere
+            - `Tel3Len` = Length in window chunks of 3' telomere
             - `TelPerc` = Percentage of sequence predicted to telomeres. (Crude calculation.)
         * `full_table_*.busco.tsv`
             - `Complete` = Number of BUSCO Complete genes in sequence
@@ -1871,6 +1879,8 @@ class Diploidocus(rje_readcore.ReadCore,rje_kat.KAT):
             #i# When cycling, this is done once before the cycling
             if self.getBool('PreTrim'):
                 seqin = self.preTrim()  ### Performs vecscreen and deptrim trimming, updates self.seqinObj() and returns trimmed fasta file
+            else:
+                self.warnLog('Diploidocus run with pretrim=F (default): check results for signs of vector contamination.')
 
             ### ~ [2] ~ Cycle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             maxstop = False; purgestop = False
@@ -3144,8 +3154,12 @@ class Diploidocus(rje_readcore.ReadCore,rje_kat.KAT):
                 pfile = self.getPAFFile()   #baseFile() + 'checkpos.paf'
                 pafcmd = self.cmd_list + ['checkpos={}'.format(vfile),'pafin={}'.format(pfile)] + checkcmd
                 paf = rje_paf.PAF(self.log, pafcmd)
-                cdb = paf.checkPos(save=False)
-                self.db().list['Tables'].append(cdb)
+                paf.list['CheckFields'] = self.list['CheckFields']
+                paf.obj['DB'] = self.db()
+                #!# Add provision of existing cdb
+                cdb = paf.checkPos(save=False,cdb=cdb)
+                if cdb not in self.db().list['Tables']:
+                    self.db().list['Tables'].append(cdb)
                 cdb.setStr({'Name':'checkpos'})
                 if not self.getBool('RegCNV'):
                     cdb.saveToFile(backup=False)
@@ -3790,7 +3804,7 @@ class Diploidocus(rje_readcore.ReadCore,rje_kat.KAT):
         >> scdepth:bool [False] = Whether to return single copy read depth only (w/o Genome Size prediction)
         '''
         try:### ~ [1] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            if not self.obj['DepthSizer']:
+            if 'DepthSizer' not in self.obj or not self.obj['DepthSizer']:
                 self.obj['DepthSizer'] = depthsizer.DepthSizer(self.log, ['basefile=depthsizer'] + self.cmd_list)
                 self.obj['DepthSizer'].setup()
             if scdepth: return self.obj['DepthSizer'].getSCDepth()
@@ -4723,7 +4737,7 @@ class Diploidocus(rje_readcore.ReadCore,rje_kat.KAT):
             if gapwarn: self.warnLog('{} sequences have >50% gaps. Check use of minmedian=X'.format(rje.iStr(gapwarn)))
             self.printLog('\r#FIELDS',', '.join(dipdb.fields()))
             #i# Tidy up join
-            dipdb.fillBlanks(blank='False',fields=['Tel5','Tel3'],fillempty=True,prog=True,log=True)
+            dipdb.fillBlanks(blank='False',fields=['Tel5','Tel3','Tel5Len','Tel3Len'],fillempty=True,prog=True,log=True)
             dipdb.fillBlanks(blank=-1,fields=['Trim5','Trim3'],fillempty=True,prog=True,log=True)
             dipdb.fillBlanks(blank=0,fields=['ScreenCov','Complete','Duplicated','Fragmented'],fillempty=True,prog=True,log=True)
             dipdb.fillBlanks(blank=0.0,fields=['TelPerc','ScreenPerc'],fillempty=True,prog=True,log=True)
@@ -4732,7 +4746,7 @@ class Diploidocus(rje_readcore.ReadCore,rje_kat.KAT):
                 if entry['MaxHitCov'] == '-': entry['MaxHitCov'] = 0.0
             #!# Reorder dipdb fields
             fields = {'str':['SeqName', 'TopHit', 'SecHit', 'PurgeHap'],
-                    'int': ['SeqLen', 'Median_fold', 'Covered_bases', 'Plus_reads', 'Minus_reads','TopNum','SecNum', 'SelfMedK', 'MedK', 'ScreenCov', 'Trim5', 'Trim3', 'Complete', 'Duplicated', 'Fragmented','Gap_bases','N_bases'],
+                    'int': ['SeqLen', 'Median_fold', 'Covered_bases', 'Plus_reads', 'Minus_reads','TopNum','SecNum', 'SelfMedK', 'MedK', 'ScreenCov', 'Tel5Len', 'Tel3Len', 'Trim5', 'Trim3', 'Complete', 'Duplicated', 'Fragmented','Gap_bases','N_bases'],
                     'num': ['Avg_fold', 'Covered_percent', 'Read_GC', 'LowPerc', 'HapPerc', 'DipPerc', 'HighPerc', 'TopHitCov', 'MaxHitCov', 'SelfAvgK', 'AvgK', 'SeqGC', 'KPerc', 'ScreenPerc', 'TelPerc'],
                     'bool': ['Tel5', 'Tel3']}
             reformat = {}
@@ -5450,52 +5464,64 @@ class Diploidocus(rje_readcore.ReadCore,rje_kat.KAT):
         whether the ends have telomeres and how much was trimmed off as being Ns (5' and 3').
         Based on https://github.com/JanaSperschneider/FindTelomeres.
         >> sequence:str = DNA sequence to search
-        << returns dictionary of {'tel5':T/F,'tel3':T/F,'trim5':INT,'trim3':INT}
+        << returns dictionary of {'tel5':T/F,'tel3':T/F,'trim5':INT,'trim3':INT,'tel5len':INT,'tel3len':INT}
         '''
         try:### ~ [1] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            trim5 = 0
-            trim3 = 0
-            telomere_at_start, telomere_at_end = False, False
             tel_forward, tel_reverse = self.getStrUC('TeloFwd'), self.getStrUC('TeloRev')
             sequence = sequence.upper()
             WINDOW = self.getInt('TeloSize')
             REPEAT_CUTOFF = self.getNum('TeloPerc')
-
+            ## ~ [1a] Terminal N-trimming ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
+            trim5 = 0
             for index, position in enumerate(sequence):
                 if position != 'N':
                     trim5 = index
                     break
             start_of_sequence_withoutNs = trim5
-
+            trim3 = 0
             for index, position in enumerate(reversed(sequence)):
                 if position != 'N':
                     trim3 = index
                     break
             end_of_sequence_withoutNs = len(sequence) - trim3
 
-            # Look for telomeric repeats at the start of the sequence
-            telomeric_repeats = re.findall(tel_forward, sequence[start_of_sequence_withoutNs:start_of_sequence_withoutNs+WINDOW])
-            # Calculate the % of nucleotides that are part of telomeric repeats
-            percent_telomeric_repeats_start = 100.0*sum([len(repeat) for repeat in telomeric_repeats])/float(WINDOW)
+            ### ~ [2] Look for Telomeres ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            ## ~ [2a] Look for telomeric repeats at the start of the sequence ~~~~~~~~~~~~~~~~~~~~~ ##
+            tel5 = 0    # Keep cycling through bigger windows until it breaks down
+            while start_of_sequence_withoutNs < end_of_sequence_withoutNs:
+                telomeric_repeats = re.findall(tel_forward, sequence[start_of_sequence_withoutNs:start_of_sequence_withoutNs+WINDOW])
+                # Calculate the % of nucleotides that are part of telomeric repeats
+                percent_telomeric_repeats_start = 100.0*sum([len(repeat) for repeat in telomeric_repeats])/float(WINDOW)
+                # If more than half of nucleotides at the start/end are telomeric repeats
+                if percent_telomeric_repeats_start >= REPEAT_CUTOFF:
+                    tel5 += 1
+                    start_of_sequence_withoutNs += WINDOW
+                else:
+                    break
+            telomere_at_start = tel5 > 0
+            ## ~ [2b] Look for telomeric repeats at the end of the sequence ~~~~~~~~~~~~~~~~~~~~~ ##
+            tel3 = 0
+            while end_of_sequence_withoutNs > trim5:
+                telomeric_repeats = re.findall(tel_reverse, sequence[(end_of_sequence_withoutNs-WINDOW):end_of_sequence_withoutNs])
+                # Calculate the % of nucleotides that are part of telomeric repeats
+                percent_telomeric_repeats_end = 100.0*sum([len(repeat) for repeat in telomeric_repeats])/float(WINDOW)
+                if percent_telomeric_repeats_end >= REPEAT_CUTOFF:
+                    tel3 += 1
+                    end_of_sequence_withoutNs -= WINDOW
+                else:
+                    break
+            telomere_at_end = tel3 > 0
 
-            # Look for telomeric repeats at the end of the sequence
-            telomeric_repeats = re.findall(tel_reverse, sequence[(end_of_sequence_withoutNs-WINDOW):end_of_sequence_withoutNs])
-            # Calculate the % of nucleotides that are part of telomeric repeats
-            percent_telomeric_repeats_end = 100.0*sum([len(repeat) for repeat in telomeric_repeats])/float(WINDOW)
-
-            # If more than half of nucleotides at the start/end are telomeric repeats
-            if percent_telomeric_repeats_start >= REPEAT_CUTOFF:
-                telomere_at_start = True
-            if percent_telomeric_repeats_end >= REPEAT_CUTOFF:
-                telomere_at_end = True
-
-            # Calculate total percentage telomeres (does not enforce terminal sequences)
+            ## ~ [2c] Calculate total percentage telomeres (does not enforce terminal sequences) ~~ ##
             telperc = 0.0
             if telomere_at_start or telomere_at_end:
                 telomeric_repeats = re.findall(tel_forward, sequence) + re.findall(tel_reverse, sequence)
                 telperc = 100.0 * sum([len(repeat) for repeat in telomeric_repeats]) / float(len(sequence) - sequence.count('N'))
 
-            return {'Tel5':telomere_at_start, 'Tel3':telomere_at_end, 'Trim5':trim5, 'Trim3':trim3, 'TelPerc':telperc}
+            #!# Update to be more sophisticated and mark end position
+            return {'Tel5':telomere_at_start, 'Tel3':telomere_at_end,
+                    'Tel5Len':WINDOW*tel5, 'Tel3Len':WINDOW*tel3,
+                    'Trim5':trim5, 'Trim3':trim3, 'TelPerc':telperc}
         except:
             self.errorLog('Diploidocus.findTelomere() error'); raise
 #########################################################################################################################
@@ -5510,7 +5536,7 @@ class Diploidocus(rje_readcore.ReadCore,rje_kat.KAT):
         '''
         try:### ~ [1] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             db = self.db()
-            #i#teldb = self.db().addEmptyTable('telomeres',['Name','SeqLen','Tel5','Tel3','Trim5','Trim3','TelPerc'],['Name'],log=self.debugging())
+            #i#teldb = self.db().addEmptyTable('telomeres',['Name','SeqLen','Tel5','Tel3','Tel5Len','Tel3Len','Trim5','Trim3','TelPerc'],['Name'],log=self.debugging())
             telfile = '{}.telomeres.{}'.format(db.baseFile(),rje.delimitExt(db.getStr('Delimit')))
             if not self.force() and rje.checkForFiles(filelist=[telfile],basename='',log=self.log):
                 teldb = db.addTable(telfile,name='telomeres',mainkeys=['Name'])
@@ -5522,11 +5548,14 @@ class Diploidocus(rje_readcore.ReadCore,rje_kat.KAT):
                 raise IOError('Diploidocus Telomere mode needs input assembly (seqin=FILE)')
             seqin = rje_seqlist.SeqList(self.log,self.cmd_list+['autoload=T','seqmode=file','summarise=F','autofilter=F'])
             ## ~ [1b] ~ Results table ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
-            teldb = self.db().addEmptyTable('telomeres',['Name','SeqLen','Tel5','Tel3','Trim5','Trim3','TelPerc'],['Name'],log=self.debugging())
+            teldb = self.db().addEmptyTable('telomeres',['Name','SeqLen','Tel5','Tel3','Tel5Len','Tel3Len','Trim5','Trim3','TelPerc'],['Name'],log=self.debugging())
             telomeres = []  # List of sequences with telomeres
             tel5 = tel3 = telboth = 0
 
             ### ~ [2] ~ Process ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+            tel_forward, tel_reverse = self.getStrUC('TeloFwd'), self.getStrUC('TeloRev')
+            self.printLog('#TEL','Forward (5\') telomere sequence: {0}'.format(tel_forward))
+            self.printLog('#TEL','Reverse (3\') telomere sequence: {0}'.format(tel_reverse))
             sx = 0.0; stot = seqin.seqNum()
             while seqin.nextSeq():
                 self.progLog('\r#TELO','Analysing {} sequences for telomeric repeats: {:.2f}%'.format(rje.iStr(stot),sx/stot)); sx += 100.0

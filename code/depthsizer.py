@@ -19,8 +19,8 @@
 """
 Module:       depthsizer
 Description:  Read-depth based genome size prediction
-Version:      1.6.0
-Last Edit:    19/11/21
+Version:      1.6.1
+Last Edit:    12/01/22
 Citation:     Chen SH et al. & Edwards RJ (preprint): bioRxiv 2021.06.02.444084 (doi: 10.1101/2021.06.02.444084)
 Copyright (C) 2021  Richard J. Edwards - See source code for GNU License Notice
 
@@ -123,6 +123,7 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     #       - MapBases = Use map bases, not covbases for min read volumne
     #       - MapRatio = Use mapbases adjusted by indelratio
     # 1.6.0 - Disable legacy mode using Diploidocus.
+    # 1.6.1 - Bug fixes to underlying R script and related core codebase.
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -133,7 +134,7 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
     # [Y] : Create initial working version of program.
     # [N] : Add REST outputs to restSetup() and restOutputOrder()
     # [Y] : Add to SLiMSuite or SeqSuite.
-    # [ ] : Update docstring.
+    # [Y] : Update docstring.
     # [Y] : Work out why the indel ratio is not working properly.
     # [Y] : Rationalise the log outputs etc.
     # [Y] : Add Lower output based solely on mapped reads (+/- Adjust)
@@ -142,10 +143,11 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
 #########################################################################################################################
 def makeInfo(): ### Makes Info object which stores program details, mainly for initial print to screen.
     '''Makes Info object which stores program details, mainly for initial print to screen.'''
-    (program, version, last_edit, copy_right) = ('DepthSizer', '1.6.0', 'November 2021', '2021')
+    (program, version, last_edit, copy_right) = ('DepthSizer', '1.6.1', 'January 2022', '2021')
     description = 'Read-depth based genome size prediction'
     author = 'Dr Richard J. Edwards.'
-    comments = ['Please raise bugs or questions at https://github.com/slimsuite/depthsizer.',rje_obj.zen()]
+    comments = ['Citation: Chen SH et al. & Edwards RJ (preprint): bioRxiv 2021.06.02.444084 (doi: 10.1101/2021.06.02.444084)',
+                'Please raise bugs or questions at https://github.com/slimsuite/depthsizer.',rje_obj.zen()]
     return rje.Info(program,version,last_edit,description,author,time.time(),copy_right,comments)
 #########################################################################################################################
 def cmdHelp(info=None,out=None,cmd_list=[]):   ### Prints *.__doc__ and asks for more sys.argv commands

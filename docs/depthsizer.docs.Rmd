@@ -1,7 +1,7 @@
 ---
-title: "DepthSizer V1.6.0 Documentation"
+title: "DepthSizer V1.6.1 Documentation"
 author: "Richard J. Edwards"
-date: "2021-11-24"
+date: "2022-01-12"
 output:
   html_document:
     css: http://www.slimsuite.unsw.edu.au/stylesheets/slimhtml.css

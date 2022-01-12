@@ -1,7 +1,7 @@
 # DepthSizer: Read-depth based genome size prediction
 
 ```
-DepthSizer v1.6.1
+DepthSizer v1.6.2
 ```
 
 For a better rendering and navigation of this document, please download and open [`./docs/depthsizer.docs.html`](./docs/depthsizer.docs.html), or visit <https://slimsuite.github.io/depthsizer/>.
@@ -49,10 +49,15 @@ regions. These are not recommended.
 
 ## Citation
 
-DepthSizer is still under review as part of the Waratah genome paper. For now, please cite the preprint:
+DepthSizer has been published as part of the Waratah genome paper:
 
-> Chen SH, Rossetto M, van der Merwe M, Lu-Irving P, Yap JS, Sauquet H, Bourke G, Amos TG, Bragg JG & Edwards RJ (preprint):
+> Chen SH, Rossetto M, van der Merwe M, Lu-Irving P, Yap JS, Sauquet H, Bourke G, Amos TG, Bragg JG & Edwards RJ (2022).
 Chromosome-level de novo genome assembly of Telopea speciosissima (New South Wales waratah) using long-reads,
+linked-reads and Hi-C. Molecular Ecology Resources doi: [10.1111/1755-0998.13574](https://doi.org/10.1111/1755-0998.13574)
+
+Please contact the author if you have trouble getting the full text version, or read the bioRxiv preprint version:
+
+> Chromosome-level de novo genome assembly of Telopea speciosissima (New South Wales waratah) using long-reads,
 linked-reads and Hi-C. [bioRxiv 2021.06.02.444084](https://www.biorxiv.org/content/10.1101/2021.06.02.444084v2.full);
 doi: 10.1101/2021.06.02.444084.
 

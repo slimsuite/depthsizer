@@ -1,7 +1,7 @@
 # DepthSizer: Read-depth based genome size prediction
 
 ```
-DepthSizer v1.6.3
+DepthSizer v1.7.0
 ```
 
 For a better rendering and navigation of this document, please download and open [`./docs/depthsizer.docs.html`](./docs/depthsizer.docs.html), or visit <https://slimsuite.github.io/depthsizer/>.
@@ -115,6 +115,7 @@ legacy=T/F      : Whether to perform Legacy v1.0.0 (Diploidocus) calculations [F
 depdensity=T/F  : Whether to use the BUSCO depth density profile in place of modal depth in legacy mode [True]
 depadjust=INT   : Advanced R density bandwidth adjustment parameter [12]
 seqstats=T/F    : Whether to output CN and depth data for full sequences as well as BUSCO genes [False]
+fragmented=T/F  : Whether to use Fragmented as well as Complete BUSCO genes for SC Depth estimates [False]
 ### ~ Forking options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
 forks=X         : Number of parallel sequences to process at once [0]
 killforks=X     : Number of seconds of no activity before killing all remaining forks. [36000]

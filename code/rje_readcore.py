@@ -19,8 +19,8 @@
 """
 Module:       rje_readcore
 Description:  Read mapping and analysis core module
-Version:      0.8.0
-Last Edit:    29/01/22
+Version:      0.9.1
+Last Edit:    20/02/23
 Copyright (C) 2021  Richard J. Edwards - See source code for GNU License Notice
 
 Function:
@@ -55,6 +55,7 @@ Commandline:
     depadjust=INT   : Advanced R density bandwidth adjustment parameter [12]
     seqstats=T/F    : Whether to output CN and depth data for full sequences as well as BUSCO genes [False]
     cnmax=INT       : Max. y-axis value for CN plot (and mode multiplier for related depth plots) [4]
+    fragmented=T/F  : Whether to use Fragmented as well as Complete BUSCO genes for SC Depth estimates [False]
     ### ~ System options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
     forks=X         : Number of parallel sequences to process at once [0]
     killforks=X     : Number of seconds of no activity before killing all remaining forks. [36000]
@@ -75,6 +76,7 @@ sys.path.append(os.path.join(slimsuitepath,'libraries/'))
 sys.path.append(os.path.join(slimsuitepath,'tools/'))
 ### User modules - remember to add *.__doc__ to cmdHelp() below ###
 import rje, rje_db, rje_forker, rje_obj, rje_seqlist
+import slimfarmer
 #########################################################################################################################
 def history():  ### Program History - only a method for PythonWin collapsing! ###
     '''
@@ -95,6 +97,9 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     # 0.7.0 - Added passing on of gfftype=LIST option to Rscript.
     # 0.7.1 - Fixed readtype recycle bug.
     # 0.8.0 - Added bamcsi=T/F : Use CSI indexing for BAM files, not BAI (needed for v long scaffolds) [False]
+    # 0.8.1 - Made reghead=LIST a synonym for checkfields=LIST.
+    # 0.9.0 - Fixed a problem with lack of Duplicated BUSCOs. Added fragmented=T option.
+    # 0.9.1 - Tweaks for Python3.
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -113,7 +118,7 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
 #########################################################################################################################
 def makeInfo(): ### Makes Info object which stores program details, mainly for initial print to screen.
     '''Makes Info object which stores program details, mainly for initial print to screen.'''
-    (program, version, last_edit, copy_right) = ('ReadMap', '0.8.0', 'January 2022', '2021')
+    (program, version, last_edit, copy_right) = ('ReadMap', '0.9.1', 'February 2023', '2021')
     description = 'Read mapping analysis module'
     author = 'Dr Richard J. Edwards.'
     comments = ['This program is still in development and has not been published.',rje_obj.zen()]
@@ -187,6 +192,7 @@ class ReadCore(rje_obj.RJE_Object):
 
     Bool:boolean
     - BAMCSI=T/F : Use CSI indexing for BAM files, not BAI (needed for v long scaffolds) [False]
+    - Fragmented=T/F  : Whether to use Fragmented as well as Complete BUSCO genes for SC Depth estimates [False]
     - Minimap2        : Whether Minimap2 found on system
     - QuickDepth=T/F  : Whether to use samtools depth in place of mpileup (quicker but underestimates?) [False]
     - Rscript         : Whether Rscript found on system
@@ -222,7 +228,7 @@ class ReadCore(rje_obj.RJE_Object):
         '''Sets Attributes of Object.'''
         ### ~ Basics ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         self.strlist = ['BAM','BUSCO','DepFile','PAF','RegFile','SeqIn','TmpDir']
-        self.boollist = ['BAMCSI','QuickDepth','SeqStats']
+        self.boollist = ['BAMCSI','Fragmented','QuickDepth','SeqStats']
         self.intlist = ['Adjust','CNMax']
         self.numlist = ['SCDepth']
         self.filelist = []
@@ -245,7 +251,7 @@ class ReadCore(rje_obj.RJE_Object):
         '''
         self.setStr({'BAM':'None','BUSCO':'None','DepFile':'None','PAF':'None','RegFile':'None','SeqIn':'None','TmpDir':'./tmpdir/',
                      'Minimap2':'minimap2','Samtools':'samtools'})
-        self.setBool({'BAMCSI':False,'QuickDepth':False,'SeqStats':False})
+        self.setBool({'BAMCSI':False,'Fragmented':False,'QuickDepth':False,'SeqStats':False})
         self.setInt({'Adjust':12,'CNMax':4})
         self.setNum({'AllBases':0,'CovBases':0,'MapAjust':0,'MapBases':0,'OldAdjust':0,'SCDepth':0})
         self.list['CheckFields'] = ['SeqName','Start','End']
@@ -267,12 +273,13 @@ class ReadCore(rje_obj.RJE_Object):
         self._cmdReadList(cmd,'path',['TmpDir'])  # String representing directory path
         self._cmdReadList(cmd,'str',['RegFile'])  # String representing directory path
         self._cmdReadList(cmd,'file',['BAM','BUSCO','DepFile','PAF','SeqIn'])  # String representing file path
-        self._cmdReadList(cmd,'bool',['BAMCSI','QuickDepth','SeqStats','Minimap2','Samtools','Rscript'])
+        self._cmdReadList(cmd,'bool',['BAMCSI','Fragmented','QuickDepth','SeqStats','Minimap2','Samtools','Rscript'])
         self._cmdReadList(cmd,'int',['Adjust','CNMax'])
         self._cmdReadList(cmd,'num',['SCDepth'])
         self._cmdReadList(cmd,'glist',['Reads'])
         self._cmdReadList(cmd,'list',['CheckFields','GFFType','ReadType'])
         self._cmdRead(cmd,'int','Adjust','depadjust')   # Integers
+        self._cmdRead(cmd,'list','CheckFields','reghead')   # List
         self._cmdRead(cmd,type='str',att='RegFile',arg='regcheck')  # No need for arg if arg = att.lower()
         self._cmdRead(cmd,type='list',att='CheckFields',arg='reghead')  # No need for arg if arg = att.lower()
 #########################################################################################################################
@@ -574,7 +581,7 @@ class ReadCore(rje_obj.RJE_Object):
                 raise IOError('BUSCO file not given (busco=FILE)')
             ### ~ [3] Check RegFile ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             if self.getStrLC('RegFile'):
-                regfilename = string.split(string.split(self.getStr('RegFile'),',')[0],':')[-1]
+                regfilename = rje.split(rje.split(self.getStr('RegFile'),',')[0],':')[-1]
                 rje.checkForFiles([regfilename],basename='',log=self.log,ioerror=True)
                 ## ~ [3a] Check Fields ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
                 if regfilename.endswith('.gff') or regfilename.endswith('.gff3'):
@@ -712,7 +719,7 @@ class ReadCore(rje_obj.RJE_Object):
             self.printLog('#BAM', 'SAM to BAM conversion')
             try:
                 sam2bam = 'samtools view -bo {0}.tmp.bam -@ {1} -S {2}.sam'.format(prefix,self.threads()-1,prefix)
-                logline = self.loggedSysCall(sam2bam, maplog, append=True, nologline='No stdout from sam2bam')
+                logline = self.loggedSysCall(sam2bam, maplog, append=True, nologline='No stdout from sam2bam',slimfarmer=slimfarmer)
                 if not self.checkBAMFile(tmpfile,makeindex=False,needed=True): raise IOError('Problem with temp BAM file')
             except:
                 self.printLog('#BAM','Converting SAM to BAM. Using a single thread due to missing data.')
@@ -722,7 +729,7 @@ class ReadCore(rje_obj.RJE_Object):
             ## ~ [2c] Sorting BAM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
             self.printLog('#BAM','Sorting BAM file.')
             bamsort = 'samtools sort -@ {0} -o {1}.bam -m 6G {2}.tmp.bam'.format(self.threads()-1,prefix,prefix)
-            logline = self.loggedSysCall(bamsort,maplog,append=True)
+            logline = self.loggedSysCall(bamsort,maplog,append=True,slimfarmer=slimfarmer)
             if not self.checkBAMFile(bamfile, makeindex=False, needed=True): raise IOError('Problem with sorted BAM file')
             os.unlink('{0}.tmp.bam'.format(prefix))
             if self.debugging(): self.printLog('#SAM','Keeping "{0}.sam" (debug=T): delete later'.format(prefix))
@@ -819,7 +826,7 @@ class ReadCore(rje_obj.RJE_Object):
                     runmap = False
                     mapfile = bamfile
                 if runmap:
-                    logline = self.loggedSysCall(mapcmd,maplog,append=True)
+                    logline = self.loggedSysCall(mapcmd,maplog,append=True,slimfarmer=slimfarmer)
                 else:
                     self.printLog('#MAP','Will use existing file "{0}" (force=F).'.format(mapfile))
                 if not os.path.getsize(mapfile): raise IOError('{0} not generated correctly'.format(mapfile))
@@ -1151,6 +1158,7 @@ class ReadCore(rje_obj.RJE_Object):
                     options.append('{0}={1}'.format(lcmd.lower(), ','.join(self.list[lcmd])))
             if self.debugging(): options.append('debug=TRUE')
             if self.getBool('SeqStats'): options.append('seqstats=TRUE')
+            if self.getBool('Fragmented'): options.append('fragmented=TRUE')
             optionstr = ' '.join(options)
             return optionstr
         except: self.errorLog('%s.callRscript error' % self.prog())
@@ -1198,12 +1206,12 @@ class ReadCore(rje_obj.RJE_Object):
         try:### ~ [0] Set up ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             self.headLog('Calculate Genome Size', line='-')
             readbp = self.baseCount()
-            if adjust == 'None': adjust = None
             gdb = self.db('gensize')
+            if not adjust or adjust.lower() == 'none': adjust = 'None'
             if not gdb: gdb = self.db().addEmptyTable('gensize',['SeqFile','DepMethod','Adjust','ReadBP','MapAdjust','SCDepth','EstGenomeSize'],['SeqFile','DepMethod','Adjust'])
             depmethod = 'mpileup'
             if self.getBool('QuickDepth'): depmethod = 'depth'
-            adjustments = [None,'IndelRatio','MapAdjust','MapRatio','CovBases','OldAdjust','AllBases','MapBases','OldCovBases']
+            adjustments = ['None','IndelRatio','MapAdjust','MapRatio','CovBases','OldAdjust','AllBases','MapBases','OldCovBases']
             if self.getNum('IndelRatio') and self.getNum('MapBases'):
                 mapadjust = self.getNum('MapBases') / self.getNum('IndelRatio')
                 self.setNum({'MapRatio':mapadjust})
@@ -1223,10 +1231,10 @@ class ReadCore(rje_obj.RJE_Object):
             scdepth = self.getSCDepth()
             ### ~ [1] Calculate genome size ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             for nkey in adjustments:
-                if nkey and not self.getNum(nkey): continue
+                if nkey and nkey != 'None' and not self.getNum(nkey): continue
                 mapadjust = 1.0
                 desc = 'Unadjusted'
-                if nkey:
+                if nkey != 'None':
                     mapadjust = self.getNum(nkey)
                     desc = nkey
                 if nkey in ['CovBases','AllBases','MapBases','MapRatio']:
@@ -1243,7 +1251,7 @@ class ReadCore(rje_obj.RJE_Object):
                     mapadjust = 1.0
                 else:
                     adjreadbp = readbp * mapadjust
-                if nkey:
+                if nkey != 'None':
                     self.printLog('#READBP', 'Total base count ({0} adjusted): {1}'.format(nkey,rje.iStr(adjreadbp)))
                 estgensize = int(0.5+(float(adjreadbp) / scdepth))
                 scprint = rje.dp(scdepth, 2)
@@ -1254,9 +1262,7 @@ class ReadCore(rje_obj.RJE_Object):
                 gdb.addEntry({'SeqFile':os.path.basename(self.getStr('SeqIn')),'DepMethod':depmethod,
                                   'Adjust':akey,'ReadBP':readbp,'MapAdjust':mapadjust,
                                   'SCDepth':scprint,'EstGenomeSize':estgensize})
-                if not nkey and not adjust:
-                    self.setInt({'EstGenomeSize':estgensize})
-                elif nkey and nkey.lower() == adjust.lower():
+                if nkey.lower() == adjust.lower():
                     self.setInt({'EstGenomeSize':estgensize})
             if save: gdb.saveToFile()
             return self.getInt('EstGenomeSize')

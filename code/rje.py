@@ -19,8 +19,8 @@
 """
 Module:       rje
 Description:  Contains SLiMSuite and Sequite General Objects
-Version:      4.24.1
-Last Edit:    22/02/23
+Version:      4.24.2
+Last Edit:    27/03/23
 Copyright (C) 2005  Richard J. Edwards - See source code for GNU License Notice
 
 Function:
@@ -177,6 +177,7 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     # 4.23.1 - Added HPC etc. warning for i>=0.
     # 4.24.0 - Changed warning and error repeat behaviour at EndLog.
     # 4.24.1 - Fixed signif calculation and sortKeys for python3.
+    # 4.24.2 - Fixed md5 hash bug.
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -2854,8 +2855,7 @@ def factorial(m,callobj=None): ### Returns the factorial of the number m
 def isEven(num): return not isOdd(num)
 def isOdd(num):     ### Returns True if Odd or False if Even
     '''Returns True if Odd or False if Even.'''
-    if (float(num) / 2) == (int(num) / 2): return False
-    return True
+    return num % 2 != 0
 #########################################################################################################################
 def geoMean(numlist=[]):    ### Returns geometric mean of numbers
     '''Returns geometric mean of numbers in list.'''
@@ -3720,7 +3720,10 @@ def subDir(pathname,exclude=[]):   ### Returns the subdirectories given by glob.
 #########################################################################################################################
 def file2md5(filename): ### Returns md5hash of file contents
     if not exists(filename): return ''
-    return hashlib.md5(open(filename,'r').read()).hexdigest()
+    try:
+        return hashlib.md5(open(filename,'r').read()).hexdigest()
+    except:
+        return hashlib.md5(open(filename, 'r').read().encode('utf-8')).hexdigest()
 #########################################################################################################################
 def stripPath(path): return os.path.basename(path)
 def basePath(path): return makePath(os.path.dirname(path))

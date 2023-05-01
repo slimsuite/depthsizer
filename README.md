@@ -1,7 +1,7 @@
 # DepthSizer: Read-depth based genome size prediction
 
 ```
-DepthSizer v1.7.0
+DepthSizer v1.8.0
 ```
 
 For a better rendering and navigation of this document, please download and open [`./docs/depthsizer.docs.html`](./docs/depthsizer.docs.html), or visit <https://slimsuite.github.io/depthsizer/>.
@@ -46,6 +46,12 @@ default `IndelRatio`) will be used for "the" genome size prediction.
 **Version 1.1.** The core depth calculation shifted in Version 1.1. `Legacy` mode will use the old code to
 calculate the modal read depth for each BUSCO gene along with the overall modal read depth for all gene
 regions. These are not recommended.
+
+**Version 1.8.** Version 1.8 introduced a new `reduced=T/F` mode, which only processes sequences that have BUSCO
+predictions. (Complete, Duplicated or Fragmented.) This is _on_ (`True`) by default, and substantially reduces
+the disk footprint and processing time for highly fragmented genomes. If the BUSCO Completeness is low, using the
+`fragmented=T` option (introduced in version 1.7, default `False`) will use `Fragmented` BUSCO genes as well as
+`Complete` genes to establish the single-copy read depth.
 
 ## Citation
 
@@ -115,6 +121,7 @@ legacy=T/F      : Whether to perform Legacy v1.0.0 (Diploidocus) calculations [F
 depdensity=T/F  : Whether to use the BUSCO depth density profile in place of modal depth in legacy mode [True]
 depadjust=INT   : Advanced R density bandwidth adjustment parameter [12]
 seqstats=T/F    : Whether to output CN and depth data for full sequences as well as BUSCO genes [False]
+reduced=T/F     : Only generate/use fastmp for BUSCO-containing sequences (*.busco.fastmp) [True]
 fragmented=T/F  : Whether to use Fragmented as well as Complete BUSCO genes for SC Depth estimates [False]
 ### ~ Forking options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
 forks=X         : Number of parallel sequences to process at once [0]
@@ -155,7 +162,8 @@ BUSCO single-copy genes are parsed from a BUSCO full results table, given by `bu
 and the `Contig`, `Start` and `End` fields are used to define the regions that should be predominantly single copy.
 [BUSCOMP](https://github.com/slimsuite/buscomp) v0.10.0 and above will generate a `*.complete.tsv` file that can
 be used in place of BUSCO results. This can enable rapid re-annotation of BUSCO genes following, for example,
-vector trimming with [Diploidocus](https://github.com/slimsuite/diploidocus).
+vector trimming with [Diploidocus](https://github.com/slimsuite/diploidocus). If `fragmented=T` then entries with
+`Status` = `Fragmented` are also used. This is useful when Completeness is low.
 
 ## Step 3: Single-copy read depth
 
@@ -171,7 +179,11 @@ By default, the density bandwidth smoothing parameter is set to `adjust=12`. Thi
 to check smoothing if required. Additional checking plots are also output (see Outputs below).
 
 The full output of depths per position is output to `$BAM.fastmp` (or `$BAM.fastdep` if `quickdepth=T`). The
-single-copy is also output to `$BAM.fastmp.scdepth`.
+single-copy is also output to `$BAM.fastmp.scdepth`. If `reduced=T` (the default) then the `fastmp` or `fastdep`
+file will have a `$BAM.busco.*` prefix and only include the sequences in the BUSCO table.
+
+**NOTE:** To generate output that is compatible with [DepthKopy](https://github.com/slimsuite/depthkopy), run
+with `reduced=F`.
 
 ## Step 4: Read mapping adjustments
 
@@ -298,4 +310,4 @@ fasta-style sequence header, followed on the next line by a depth value per posi
 
 
 <br>
-<small>&copy; 2021 Richard Edwards | richard.edwards@unsw.edu.au</small>
+<small>&copy; 2023 Richard Edwards | rich.edwards@uwa.edu.au</small>

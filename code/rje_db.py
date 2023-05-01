@@ -816,7 +816,7 @@ class Table(rje.RJE_Object):
         return self.entries(keys,sorted=True)
     def entries(self,keys=None,sorted=False):
         '''Returns all entries as a list.'''
-        if not keys and not sorted: return self.dict['Data'].values()
+        if not keys and not sorted: return list(self.dict['Data'].values())
         if sorted and not keys: return self.entryList(self.datakeys())
         if type(keys) != list and keys in self.dict['Data']: return self.dict['Data'][keys]
         return self.entryList(keys)

@@ -1172,7 +1172,7 @@ class SeqList(rje_obj.RJE_Object):
             meansplit = rje.split('%.2f' % meanlen,'.')
             self.printLog('#SUM','Mean length of sequences: %s.%s' % (rje.iStr(meansplit[0]),meansplit[1]))
             seqdata['MeanLength'] = meanlen
-            if rje.isOdd(len(seqlen)): median = seqlen[len(seqlen)/2]
+            if rje.isOdd(len(seqlen)): median = seqlen[len(seqlen)//2]
             else: median = sum(seqlen[(len(seqlen)//2)-1:][:2]) / 2.0
             self.printLog('#SUM','Median length of sequences: %s' % (rje.iStr(median)))
             seqdata['MedLength'] = median
@@ -3250,7 +3250,7 @@ class SeqList(rje_obj.RJE_Object):
             else: self.printLog('#SAMPLE','%s sequences output to %s.' % (rje.iStr(self.list['Sampler'][0]),rfile))
         except: self.errorLog("Problem with SeqList.sampler()"); raise
 #########################################################################################################################
-    def contigsTable(self,save=True):   ### Generate table of contig positions (SeqName, Start, End)
+    def contigsTable(self,save=True,outbase=None):   ### Generate table of contig positions (SeqName, Start, End)
         '''
         Generate table of contig positions (SeqName, Start, End, CtgLen)
         >> save:bool [True] = Whether to save table to *.contigs.tdt
@@ -3299,7 +3299,11 @@ class SeqList(rje_obj.RJE_Object):
                     seqlen = self.seqLen(seq)
                     centry = {'seqname':seqname,'start':1,'end':seqlen,'ctglen':seqlen}
                     cdb.addEntry(centry); sx += 1
-            cdb.saveToFile()
+            seqbase = rje.baseFile(self.getStr('SeqIn'),strip_path=True)
+            if self.getStrLC('SeqOut'):
+                seqbase = rje.baseFile(self.getStr('SeqOut'),strip_path=True)
+            if not self.getStrLC('SeqIn'): seqbase = self.getStr('Basefile')
+            cdb.saveToFile('%s.contigs.tdt' % seqbase)
         except: self.errorLog("Problem with SeqList.contigsTable()")
 #########################################################################################################################
      ### <6> ### Menu-based Sequence Editing                                                                            #

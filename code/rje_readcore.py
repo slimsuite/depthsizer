@@ -55,6 +55,7 @@ Commandline:
     depadjust=INT   : Advanced R density bandwidth adjustment parameter [12]
     seqstats=T/F    : Whether to output CN and depth data for full sequences as well as BUSCO genes [False]
     cnmax=INT       : Max. y-axis value for CN plot (and mode multiplier for related depth plots) [4]
+    reduced=T/F     : Only generate/use fastmp for BUSCO-containing sequences (*.busco.fastmp) [True]
     fragmented=T/F  : Whether to use Fragmented as well as Complete BUSCO genes for SC Depth estimates [False]
     ### ~ System options ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
     forks=X         : Number of parallel sequences to process at once [0]
@@ -195,6 +196,7 @@ class ReadCore(rje_obj.RJE_Object):
     - Fragmented=T/F  : Whether to use Fragmented as well as Complete BUSCO genes for SC Depth estimates [False]
     - Minimap2        : Whether Minimap2 found on system
     - QuickDepth=T/F  : Whether to use samtools depth in place of mpileup (quicker but underestimates?) [False]
+    - Reduced=T/F     : Only generate/use fastmp for BUSCO-containing sequences (*.busco.fastmp) [True]
     - Rscript         : Whether Rscript found on system
     - Samtools        : Whether Samtools found on system
     - SeqStats=T/F    : Whether to output CN and depth data for full sequences as well as BUSCO genes [False]
@@ -228,7 +230,7 @@ class ReadCore(rje_obj.RJE_Object):
         '''Sets Attributes of Object.'''
         ### ~ Basics ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         self.strlist = ['BAM','BUSCO','DepFile','PAF','RegFile','SeqIn','TmpDir']
-        self.boollist = ['BAMCSI','Fragmented','QuickDepth','SeqStats']
+        self.boollist = ['BAMCSI','Fragmented','QuickDepth','Reduced','SeqStats']
         self.intlist = ['Adjust','CNMax']
         self.numlist = ['SCDepth']
         self.filelist = []
@@ -259,7 +261,7 @@ class ReadCore(rje_obj.RJE_Object):
         self.list['Reads'] = []
         self.list['ReadType'] = ['ont']
         #i# Check for core programs
-        self.setBool({'Minimap2':True,'Samtools':True,'Rscript':True})
+        self.setBool({'Minimap2':True,'Samtools':True,'Rscript':True,'Reduced':False})
         #i# Set up Database object
         self.obj['DB'] = rje_db.Database(self.log, self.cmd_list + ['tuplekeys=T'])
         self.obj['SeqIn'] = None
@@ -273,7 +275,7 @@ class ReadCore(rje_obj.RJE_Object):
         self._cmdReadList(cmd,'path',['TmpDir'])  # String representing directory path
         self._cmdReadList(cmd,'str',['RegFile'])  # String representing directory path
         self._cmdReadList(cmd,'file',['BAM','BUSCO','DepFile','PAF','SeqIn'])  # String representing file path
-        self._cmdReadList(cmd,'bool',['BAMCSI','Fragmented','QuickDepth','SeqStats','Minimap2','Samtools','Rscript'])
+        self._cmdReadList(cmd,'bool',['BAMCSI','Fragmented','QuickDepth','SeqStats','Minimap2','Samtools','Rscript','Reduced'])
         self._cmdReadList(cmd,'int',['Adjust','CNMax'])
         self._cmdReadList(cmd,'num',['SCDepth'])
         self._cmdReadList(cmd,'glist',['Reads'])
@@ -394,9 +396,22 @@ class ReadCore(rje_obj.RJE_Object):
             seqin = self.seqinObj()
             bamfile = self.getBAMFile()
             self.printLog('#BAM','BAM File for read depth extraction: {0}'.format(bamfile))
-            fastdep = '{0}.fastmp'.format(bamfile)
+            bampref = bamfile
+            buscoseq = []
+            if self.getBool('Reduced'):
+                bampref = '{0}.busco'.format(bamfile)
+                buscoseq = os.popen('awk \'$2 == "Complete" || $2 == "Duplicated" || $2 == "Fragmented" {print $3;}\' %s | sort -u' % (self.getStr('BUSCO'))).read()
+                buscoseq = buscoseq.split()
+                self.printLog('#BUSCO','{0} BUSCO-containing sequence IDs read from {1}'.format(rje.iLen(buscoseq),self.getStr('BUSCO')))
+                snames = seqin.names()
+                nameshare = rje.listIntersect(snames,buscoseq)
+                if nameshare:
+                    self.printLog('#BUSCO','{0} of {1} sequences have BUSCO hits.'.format(rje.iLen(nameshare),rje.iLen(snames)))
+                else:
+                    raise ValueError('No input sequence names found in BUSCO results file!')
+            fastdep = '{0}.fastmp'.format(bampref)
             if self.getBool('QuickDepth'):
-                fastdep = '{0}.fastdep'.format(bamfile)
+                fastdep = '{0}.fastdep'.format(bampref)
             if not self.force() and not self.needToRemake(fastdep,bamfile):
                 self.printLog('#DEP','Existing {0} file found (force=F)'.format(fastdep))
                 self.setStr({'DepFile': fastdep})
@@ -405,12 +420,13 @@ class ReadCore(rje_obj.RJE_Object):
             self.headLog('Generating depth file', line='-')
             #!# Add forking via temp files.
             rje.backup(self,fastdep)
-            if self.threads() > 1: return self.forkDepth(bamfile,fastdep)
+            if self.threads() > 1: return self.forkDepth(bamfile,fastdep,buscoseq=buscoseq)
             self.printLog('#FORK', 'Note: program can be accelerated using forks=INT.')
             OUT = open(fastdep,'w')
             ox = 0.0; otot = seqin.seqNum()
             for seq in seqin.seqs():
                 sname = seqin.shortName(seq)
+                if buscoseq and sname not in buscoseq: otot -= 1; continue
                 seqlen = seqin.seqLen(seq)
                 self.progLog('\r#DEP','Generating depth file "{0}": {1:.1f}%'.format(fastdep,ox/otot)); ox += 100.0
                 depcmd = 'samtools view -b -h -F 0x100 {0} {1} | '.format(bamfile,sname)
@@ -433,9 +449,9 @@ class ReadCore(rje_obj.RJE_Object):
             self.setStr({'DepFile':fastdep})
             return fastdep
         except:
-            self.errorLog('{0}.getFastDep() error'.format(self.prog())); return None
+            self.errorLog('{0}.getFastDep() error'.format(self.prog())); raise
 #########################################################################################################################
-    def forkDepth(self,bamfile,fastdep,secondary=False,setstr=True):    ### Generates the fast depth file using forks and temp directory.
+    def forkDepth(self,bamfile,fastdep,secondary=False,setstr=True,buscoseq=[]):    ### Generates the fast depth file using forks and temp directory.
         '''
         Generates the fast depth file using forks and temp directory.
         >> bamfile:str = Source BAM file for depth parsing
@@ -464,6 +480,7 @@ class ReadCore(rje_obj.RJE_Object):
             cleanup = 0; skipped = 0
             forker.list['ToFork'] = []
             for sname in seqin.names():
+                if buscoseq and sname not in buscoseq: continue
                 tmpfile = '{}{}.{}.{}.tmp'.format(tmpdir,basefile,sname,depmethod)
                 if rje.exists(tmpfile):
                     #?# Add checking for completeness #?#
@@ -507,6 +524,7 @@ class ReadCore(rje_obj.RJE_Object):
             otot = seqin.seqNum()
             for seq in seqin.seqs():
                 sname = seqin.shortName(seq)
+                if buscoseq and sname not in buscoseq: otot -= 1; continue
                 seqlen = seqin.seqLen(seq)
                 self.progLog('\r#DEP', 'Generating depth file "{0}": {1:.1f}%'.format(fastdep, ox / otot))
                 ox += 100.0
@@ -544,9 +562,9 @@ class ReadCore(rje_obj.RJE_Object):
         '''
         try:### ~ [1] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             if not self.obj['SeqIn']:
-                seqcmd = self.cmd_list
-                if summarise: seqcmd = ['summarise=T']+self.cmd_list
-                self.obj['SeqIn'] = rje_seqlist.SeqList(self.log,seqcmd+['autoload=T','seqmode=file','autofilter=F'])
+                seqcmd = self.cmd_list + ['autoload=T','seqmode=file','autofilter=F','seqout=None']
+                if summarise: seqcmd = ['summarise=T'] + seqcmd
+                self.obj['SeqIn'] = rje_seqlist.SeqList(self.log,seqcmd)
                 sx = 0.0; stot = self.obj['SeqIn'].seqNum()
                 for seq in self.obj['SeqIn'].seqs():
                     self.progLog('\r#CHECK','Checking sequences names: %.1f%%' % (sx/stot)); sx += 100.0
@@ -570,6 +588,7 @@ class ReadCore(rje_obj.RJE_Object):
         '''
         try:### ~ [1] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             db = self.db()
+            busco = busco or self.getBool('Reduced')
             #i# Files to check are:
             # - BUSCO
             # - RegFile

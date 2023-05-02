@@ -148,7 +148,8 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
     # [ ] : Add the sequence, window and chromcheck settings to DepthSizer. (Also available in DepthKopy.)
     # [ ] : Check why genomesize is an option and possibly remove? (Legacy from Diploidocus origins?)
     # [ ] : Add option to use complete genome rather than BUSCOs for the SC depth.
-    # [ ] : Add a reduced=T/F option that only generates fastmp for BUSCO-containing sequences (*.busco.fastmp)
+    # [Y] : Add a reduced=T/F option that only generates fastmp for BUSCO-containing sequences (*.busco.fastmp)
+    # [ ] : Add a forkdep=T/F option that only generates the BAM & fastmps file then stops, for efficient Nextflow etc.
     '''
 #########################################################################################################################
 def makeInfo(): ### Makes Info object which stores program details, mainly for initial print to screen.

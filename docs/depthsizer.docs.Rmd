@@ -1,7 +1,7 @@
 ---
-title: "DepthSizer V1.8.0 Documentation"
+title: "DepthSizer V1.9.0 Documentation"
 author: "Richard J. Edwards"
-date: "2023-05-01"
+date: "2024-07-19"
 output:
   html_document:
     css: http://www.slimsuite.unsw.edu.au/stylesheets/slimhtml.css
@@ -117,8 +117,8 @@ use commandline options, including setting default values with **INI files**.
 seqin=FILE      : Input sequence assembly [None]
 basefile=FILE   : Root of output file names [gapspanner or $SEQIN basefile]
 summarise=T/F   : Whether to generate and output summary statistics sequence data before and after processing [True]
-genomesize=INT  : Haploid genome size (bp) [0]
 bam=FILE        : BAM file of long reads mapped onto assembly [$BASEFILE.bam]
+bamcsi=T/F      : Use CSI indexing for BAM files, not BAI (needed for v long scaffolds) [False]
 reads=FILELIST  : List of fasta/fastq files containing reads. Wildcard allowed. Can be gzipped. []
 readtype=LIST   : List of ont/pb/hifi file types matching reads for minimap2 mapping [ont]
 dochtml=T/F     : Generate HTML DepthSizer documentation (*.docs.html) instead of main run [False]
@@ -128,6 +128,9 @@ busco=TSVFILE   : BUSCO full table [full_table_$BASEFILE.busco.tsv]
 readbp=INT      : Total combined read length for depth calculations (over-rides reads=FILELIST) []
 adjustmode=X    : Map adjustment method to apply (None/CovBases/IndelRatio/MapBases/MapAdjust/MapRatio/OldAdjust/OldCovBases) [IndelRatio]
 quickdepth=T/F  : Whether to use samtools depth in place of mpileup (quicker but underestimates?) [False]
+depchunk=INT    : Chunk input into minimum of INT bp chunks for temp depth calculation [1e6]
+deponly=T/F     : Cease execution following checking/creating BAM and fastdep/fastmp files [False]
+depfile=FILE    : Precomputed depth file (*.fastdep or *.fastmp) to use [None]
 covbases=T/F    : Whether to calculate predicted minimum genome size based on mapped reads only [True]
 mapadjust=T/F   : Whether to calculate mapadjust predicted genome size based on read length:mapping ratio [False]
 benchmark=T/F   : Activate benchmarking mode and also output the assembly size and mean depth estimate [False]
@@ -150,7 +153,7 @@ logfork=T/F     : Whether to log forking in main log [False]
 The main inputs for DepthSizer genome size prediction are:
 
 * `seqin=FILE` : Input sequence assembly to tidy [Required].
-* `reads=FILELIST`: List of fasta/fastq files containing long reads. Wildcard allowed. Can be gzipped. For a single run (not cycling), a BAM file can be supplied instead with `bam=FILE`. (This will be preferentially used if found, and defaults to `$BASEFILE.bam`.) Read types (pb/ont/hifi) for each file are set with `readtype=LIST`, which will be cycled if shorter (default=`ont`). Optionally, the pre-calculated total read length can be provided with `readbp=INT` and/or the pre-calculated (haploid) genome size can be provided with `genomesize=INT`.
+* `reads=FILELIST`: List of fasta/fastq files containing long reads. Wildcard allowed. Can be gzipped.
 * `readtype=LIST` : List of ont/pb/hifi file types matching reads for minimap2 mapping [ont]
 * `busco=TSVFILE` : BUSCO full table [`full_table_$BASEFILE.busco.tsv`] used for calculating single copy ("diploid") read depth.
 
@@ -194,7 +197,13 @@ to check smoothing if required. Additional checking plots are also output (see O
 
 The full output of depths per position is output to `$BAM.fastmp` (or `$BAM.fastdep` if `quickdepth=T`). The
 single-copy is also output to `$BAM.fastmp.scdepth`. If `reduced=T` (the default) then the `fastmp` or `fastdep`
-file will have a `$BAM.busco.*` prefix and only include the sequences in the BUSCO table.
+file will have a `$BAM.busco.*` prefix and only include the sequences in the BUSCO table. By default, generation
+of the fastdep/fastmp data is performed by chunking up the assembly and creating temporary files in parallel
+(`tmpdir=PATH`). Sequences are batched in order such that each batch meets the minimum size criterion set by
+`depchunk=INT` (default 1Mbp). If `depchunk=0` then each sequence will be processed individually. This is not
+recommended for large, highly fragmented genomes. Unless `dev=T` or `debug=T`, the temporary files will be
+deleted once the final file is made. If DepthSizer crashed during the generation of the file, it should be
+possible to re-run and it will re-use existing temporary files.
 
 **NOTE:** To generate output that is compatible with [DepthKopy](https://github.com/slimsuite/depthkopy), run
 with `reduced=F`.

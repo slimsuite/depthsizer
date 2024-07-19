@@ -19,8 +19,8 @@
 """
 Module:       rje_seqlist
 Description:  RJE Nucleotide and Protein Sequence List Object (Revised)
-Version:      1.50.3
-Last Edit:    27/02/23
+Version:      1.50.4
+Last Edit:    05/06/23
 Copyright (C) 2011  Richard J. Edwards - See source code for GNU License Notice
 
 Function:
@@ -264,6 +264,7 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     # 1.50.1 - Fixed the string.atol Python3 bug.
     # 1.50.2 - More Py3 bug fixes.
     # 1.50.3 - Added bug that was leaving out last fastq sequence from summarise etc.
+    # 1.50.4 - Added gensize=NUM alias for genomesize=NUM
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -293,7 +294,7 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
 #########################################################################################################################
 def makeInfo(): ### Makes Info object which stores program details, mainly for initial print to screen.
     '''Makes Info object which stores program details, mainly for initial print to screen.'''
-    (program, version, last_edit, copy_right) = ('SeqList', '1.50.3', 'February 2023', '2011')
+    (program, version, last_edit, copy_right) = ('SeqList', '1.50.4', 'June 2023', '2011')
     description = 'RJE Nucleotide and Protein Sequence List Object (Revised)'
     author = 'Dr Richard J. Edwards.'
     comments = ['This program is still in development and has not been published.',rje_zen.Zen().wisdom()]
@@ -493,6 +494,7 @@ class SeqList(rje_obj.RJE_Object):
                 self._cmdReadList(cmd,'path',['TmpDir'])
                 self._cmdReadList(cmd,'int',['AddFlanks','FracStep','MinGap','MinLen','MaxLen','MinORF','RFTran','TerMinORF','Tile','TileStep'])
                 self._cmdReadList(cmd,'num',['GenomeSize','MinTile'])
+                self._cmdRead(cmd,type='num',att='GenomeSize',arg='gensize')
                 self._cmdReadList(cmd,'list',['PosFields'])
                 self._cmdReadList(cmd,'ilist',['LenStats'])
                 self._cmdReadList(cmd,'nlist',['Sampler'])
@@ -868,12 +870,12 @@ class SeqList(rje_obj.RJE_Object):
                 SEQFILE = self.SEQFILE()
                 SEQFILE.seek(seq)
                 name = rje.chomp(SEQFILE.readline())
+                quality = ''
                 if name[:1] == '@': # FASTQ
                     name = name[1:]
-                    sequence = ''; line = rje.chomp(SEQFILE.readline())
-                    while line and line[:1] != '+':
-                        sequence += line
-                        line = rje.chomp(SEQFILE.readline())
+                    sequence = rje.chomp(SEQFILE.readline())
+                    line = rje.chomp(SEQFILE.readline())
+                    quality = rje.chomp(SEQFILE.readline())
                 elif name[:1] == '>':
                     name = name[1:]
                     sequence = ''; line = rje.chomp(SEQFILE.readline())
@@ -889,6 +891,7 @@ class SeqList(rje_obj.RJE_Object):
                     if case: return {'Name':name,'Sequence':sequence}
                     else: return {'Name':name,'Sequence':sequence.upper()}
                 elif format == 'short': return rje.split(name)[0]
+                elif format == 'fastq': return (name,sequence,quality)
                 else:
                     if case: return (name,sequence)
                     else: return (name,sequence.upper())
@@ -2546,8 +2549,8 @@ class SeqList(rje_obj.RJE_Object):
                     sequence = sequence[:cstart-1] + 'N' * (cend-cstart+1) + sequence[cend:]
                     if len(sequence) != seqlen: raise ValueError('Masking problem!')
                     sname = '%s (masked %s-%s)' % (sname,rje.iStr(cstart),rje.iStr(cend))
-                    self.list['Seq'][i] = (seqname, sequence)
-                    masked.append(i)
+                    self.list['Seq'][seqi] = (seqname, sequence)
+                    masked.append(seqi)
                 else:
                     sequence = sequence[cstart-1:cend]
                     sname = '%s (region %s-%s)' % (sname,rje.iStr(cstart),rje.iStr(cend))
@@ -3862,7 +3865,7 @@ def batchSummarise(callobj,seqfiles,save=True,overwrite=False,seqcmd=[]):   ### 
                 for field in list(seqdata.keys()):
                     if field not in sdb.fields(): sdb.addField(field)
                 sdb.addEntry(seqdata)
-            else: callobj.errorLog('Summarise failed for %s' % file,printerror=False)
+            else: callobj.printLog('#NOSUM','Summarise failed for %s' % file)
         ### ~ [3] Output Summarise ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
         if save: sdb.saveToFile()
         return sdb

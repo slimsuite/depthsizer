@@ -19,8 +19,8 @@
 """
 Module:       rje_readcore
 Description:  Read mapping and analysis core module
-Version:      0.11.0
-Last Edit:    17/07/24
+Version:      0.12.3
+Last Edit:    06/08/24
 Copyright (C) 2021  Richard J. Edwards - See source code for GNU License Notice
 
 Function:
@@ -107,6 +107,10 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     # 0.10.0 - Added bug fixes and improved tmp file usage for *.fastmp generation.
     # 0.10.1 - Added depchunk=INT : Chunk input into minimum of INT bp chunks for temp depth calculation  [1e6]
     # 0.11.0 - Added multithreading to R script. Added rDNA parsing to defaults.
+    # 0.12.0 - Fixed reduced DepthSizer to cope with -ve strand BUSCO formatting.
+    # 0.12.1 - Fixed fragmented mode to use different scdepth file.
+    # 0.12.2 - Fixed bug when depth chunking BUSCO sequences that might miss the last batch of sequences.
+    # 0.12.3 - Fixed bug that prevented different minimap2 and samtools commands being given.
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -125,11 +129,12 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
     # [ ] : Add padding the start of Depth files where needed.
     # [ ] : Add capacity to chunk up several input sequences for fastmp creation at once.
     # [ ] : Add integrity checks for fastmp tmp file creation: create and then delete a *.making file.
+    # [ ] : Should indelratio use the whole file?
     '''
 #########################################################################################################################
 def makeInfo(): ### Makes Info object which stores program details, mainly for initial print to screen.
     '''Makes Info object which stores program details, mainly for initial print to screen.'''
-    (program, version, last_edit, copy_right) = ('ReadMap', '0.10.0', 'July 2024', '2021')
+    (program, version, last_edit, copy_right) = ('ReadMap', '0.12.3', 'August 2024', '2021')
     description = 'Read mapping analysis module'
     author = 'Dr Richard J. Edwards.'
     comments = ['This program is still in development and has not been published.',rje_obj.zen()]
@@ -284,9 +289,9 @@ class ReadCore(rje_obj.RJE_Object):
         '''
         ### Class Options (No need for arg if arg = att.lower()) ###
         self._cmdReadList(cmd,'path',['TmpDir'])  # String representing directory path
-        self._cmdReadList(cmd,'str',['RegFile'])  # String representing directory path
+        self._cmdReadList(cmd,'str',['RegFile','Minimap2','Samtools'])  
         self._cmdReadList(cmd,'file',['BAM','BUSCO','DepFile','PAF','SeqIn'])  # String representing file path
-        self._cmdReadList(cmd,'bool',['BAMCSI','Fragmented','QuickDepth','SeqStats','Minimap2','Samtools','Rscript','Reduced'])
+        self._cmdReadList(cmd,'bool',['BAMCSI','Fragmented','QuickDepth','SeqStats','Rscript','Reduced'])
         self._cmdReadList(cmd,'int',['Adjust','CNMax','DepChunk'])
         self._cmdReadList(cmd,'num',['SCDepth'])
         self._cmdReadList(cmd,'glist',['Reads'])
@@ -379,7 +384,9 @@ class ReadCore(rje_obj.RJE_Object):
         try:### ~ [1] ~ Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             #i# Check for existing PAF file
             seqin = self.getStr('SeqIn')
+            self.debug('{0}:{1}'.format(self.getStr('PAF'),rje.exists(self.getStr('PAF'))))
             paffile = self.setPAFFile()
+            self.debug('{0}:{1}'.format(paffile,rje.exists(self.getStr('PAF'))))
             if not self.needToRemake(paffile,seqin): return paffile
             if not make:
                 if expect: raise IOError('{0} not found or too old!'.format(paffile))
@@ -557,7 +564,7 @@ class ReadCore(rje_obj.RJE_Object):
 
             ### ~ [4] Cleanup temp files ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             tx = 0
-            if not self.dev() and not self.debugging():
+            if not self.debugging():
                 for seq in seqin.seqs():
                     sname = seqin.shortName(seq)
                     tmpfile = '{}{}.{}.{}.tmp'.format(tmpdir, basefile, sname, depmethod)
@@ -600,18 +607,25 @@ class ReadCore(rje_obj.RJE_Object):
             ### ~ [2] Cycle through and fork out the depth calculations ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             self.printLog('#CHUNK','Chunking seqin into at least {0} chunks for depth calculation'.format(rje_seqlist.dnaLen(self.getInt('DepChunk'))))
             ## ~ [2a] Setup forking ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
-            cleanup = 0;
+            cleanup = 0
             skipped = 0
+            forkseqx = 0
+            debugx = 0
             forker.list['ToFork'] = []
             chunktot = 0    # Total length for this chunk
             namelist = []   # This will store the sequence names in this chunk
             chunk = []      # This will store the sequence objects in this chunk
-            lastseq = seqin.seqs()[-1]
+            lasti = -1
+            lastseq = seqin.seqs()[lasti]
+            while buscoseq and seqin.shortName(lastseq) not in buscoseq:
+                lasti -= 1
+                lastseq = seqin.seqs()[lasti]
             chunks = []     # List of lists corresponding to chunks
             for seq in seqin.seqs():
                 sname = seqin.shortName(seq)
                 # Check and increase chunk size
                 if buscoseq and sname not in buscoseq: continue
+                forkseqx += 1; debugx += 1
                 slen = seqin.seqLen(seq)
                 chunktot += slen
                 namelist.append(sname)
@@ -622,6 +636,7 @@ class ReadCore(rje_obj.RJE_Object):
                 sname = '{0}--{1}'.format(namelist[0],namelist[-1])
                 tmpfile = '{}{}.{}.{}.tmp'.format(tmpdir, basefile, sname, depmethod)
                 mkfile = '{}{}.{}.{}.making'.format(tmpdir, basefile, sname, depmethod)
+                self.bugPrint('{0} sequences -> {1}'.format(debugx,tmpfile)); debugx = 0
                 if rje.exists(tmpfile) and rje.exists(mkfile):
                     os.unlink(tmpfile)
                     os.unlink(mkfile)
@@ -653,7 +668,7 @@ class ReadCore(rje_obj.RJE_Object):
                 # i# Forks
                 forker.list['ToFork'].append(depcmd)
                 namelist = []; chunktot = 0; chunk = []
-            self.printLog('#CHUNK', '{0} chunks for {1} sequences.'.format(rje.iLen(chunks),rje.iStr(seqin.seqNum())))
+            self.printLog('#CHUNK', '{0} chunks for {1} sequences.'.format(rje.iLen(chunks),rje.iStr(forkseqx)))
             self.printLog('#DEPTH', '{} chunks queued for forking ({} existing files deleted); {} existing results skipped'.format(rje.iLen(forker.list['ToFork']), rje.iStr(cleanup), rje.iStr(skipped)))
             ## ~ [2b] Fork out depth analysis ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
             if forker.list['ToFork']:
@@ -717,6 +732,7 @@ class ReadCore(rje_obj.RJE_Object):
             ox = 0.0
             otot = len(chunks)
             tmpfiles = []
+            depseqx = 0
             for chunk in chunks:
                 sname = '{0}--{1}'.format(seqin.shortName(chunk[0]),seqin.shortName(chunk[-1]))
                 tmpfile = '{}{}.{}.{}.tmp'.format(tmpdir, basefile, sname, depmethod)
@@ -724,18 +740,18 @@ class ReadCore(rje_obj.RJE_Object):
                 tmpdep = '{}{}.{}.{}.tmpdep'.format(tmpdir, basefile, sname, depmethod)
                 self.progLog('\r#DEP', 'Generating depth file "{0}": {1:.2f}%'.format(fastdep, ox / otot))
                 ox += 100.0
+                depseqx += int(os.popen("grep -c '>' %s" % tmpdep).readline())
                 if rje.exists(tmpdep):
                     OUT.write(open(tmpdep,'r').read())
-                    os.unlink(tmpdep)
-                    #if not self.dev() and not self.debugging(): os.unlink(tmpfile)
+                    if not self.debugging(): os.unlink(tmpdep)
                 else:
                     raise IOError('{0} Missing!'.format(tmpdep))
-            self.printLog('\r#DEP', 'Generated depth file "{0}": {1} chunks; {2} sequences'.format(fastdep, rje.iLen(chunks), rje.iStr(otot)))
+            self.printLog('\r#DEP', 'Generated depth file "{0}": {1} chunks; {2} sequences'.format(fastdep, rje.iLen(chunks), rje.iStr(depseqx)))
             OUT.close()
 
             ### ~ [4] Cleanup temp files ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             tx = 0
-            if not self.dev() and not self.debugging():
+            if not self.debugging():
                 for tmpfile in tmpfiles:
                     if rje.exists(tmpfile): os.unlink(tmpfile); tx += 1
             self.printLog('#TMP','{0} temp files deleted.'.format(rje.iStr(tx)))
@@ -754,8 +770,8 @@ class ReadCore(rje_obj.RJE_Object):
     def setup(self):    ### Main class setup method.
         '''Main class setup method.'''
         try:### ~ [1] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-            self.setBool({'Minimap2': self.getBool('Minimap2') and self.checkForProgram('minimap2'),
-                          'Samtools': self.getBool('Samtools') and self.checkForProgram('samtools'),
+            self.setBool({'Minimap2': self.getBool('Minimap2') and self.checkForProgram(self.minimap2()),
+                          'Samtools': self.getBool('Samtools') and self.checkForProgram(self.samtools()),
                           'Rscript': self.getBool('Rscript') and self.checkForProgram('Rscript')})
             return True     # Setup successful
         except: self.errorLog('Problem during %s setup.' % self.prog()); return False  # Setup failed
@@ -1152,7 +1168,8 @@ class ReadCore(rje_obj.RJE_Object):
                 if bedfile == 'full_table.bed':
                     bedfile = self.baseFile() + '.full_table.bed'
                 if self.force() or not rje.checkForFiles([bedfile],log=self.log):
-                    os.system('grep Complete %s | awk \'{print $3"\t"$4"\t"$5;}\' > %s' % (self.getStr('BUSCO'),bedfile))
+                    os.system('grep Complete %s | awk \'$5 > $4 {print $3"\t"$4"\t"$5;}\' > %s' % (self.getStr('BUSCO'),bedfile))
+                    os.system('grep Complete %s | awk \'$4 > $5 {print $3"\t"$5"\t"$4;}\' >> %s' % (self.getStr('BUSCO'), bedfile))
                     if rje.exists(bedfile):
                         self.printLog('#BUSCO','Converted BUSCO Complete to {0}'.format(bedfile))
                     else:
@@ -1353,6 +1370,7 @@ class ReadCore(rje_obj.RJE_Object):
         '''
         try:### ~ [1] Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
             depfile = self.getFastDep()         # This will generate the BAM file if needed
+            if self.getBool('Fragmented'): depfile += '.frag'
             scdfile = '{0}.scdepth'.format(depfile)
             if self.needToRemake(scdfile,depfile):
                 optionstr = self.makeOptionStr(['depfile','busco','adjust','basefile'])

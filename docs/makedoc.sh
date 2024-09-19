@@ -1,12 +1,12 @@
 export RSTUDIO_PANDOC=/Applications/RStudio.app/Contents/MacOS/pandoc
 
-python ../code/depthsizer.py dochtml newlog
+python3 ../code/depthsizer.py dochtml newlog
 
-python ../code/depthsizer.py --description | sed 's/^/# /' > ../DepthSizer.md
+python3 ../code/depthsizer.py --description | sed 's/^/# /' > ../DepthSizer.md
 echo >> ../DepthSizer.md
 
 echo '```' >> ../DepthSizer.md
-python ../code/depthsizer.py --details >> ../DepthSizer.md
+python3 ../code/depthsizer.py --details >> ../DepthSizer.md
 echo '```' >> ../DepthSizer.md
 echo >> ../DepthSizer.md
 echo 'For a better rendering and navigation of this document, please download and open [`./docs/depthsizer.docs.html`](./docs/depthsizer.docs.html), or visit <https://slimsuite.github.io/depthsizer/>.' >> ../DepthSizer.md

@@ -1,7 +1,7 @@
 ########################################################
 ### DepthCopy SC depth functions               ~~~~~ ###
-### VERSION: 1.5.0                             ~~~~~ ###
-### LAST EDIT: 19/07/24                        ~~~~~ ###
+### VERSION: 1.6.0                             ~~~~~ ###
+### LAST EDIT: 13/09/24                        ~~~~~ ###
 ### AUTHORS: Richard Edwards 2021              ~~~~~ ###
 ### CONTACT: richard.edwards@unsw.edu.au       ~~~~~ ###
 ########################################################
@@ -43,7 +43,12 @@
 # v1.4.0 : Added bug fixes for the main Python wrapper.
 # v1.4.1 : Added settings$collapse (default=Family) for calculating collapsed CN of regions.
 # v1.5.0 : Added multithreading. Added rDNA parsing to defaults.
-version = "v1.5.0"
+# v1.5.1 : Added mutate sapply in place of row loop to speed up processing.
+# v1.5.2 : Fixed fragmented mode to use different scdepth file. 
+# v1.5.3 : Fixed bug with window generation. Fixed XN and XBP calculation.
+# v1.5.4 : Added error catching for odd buscoDepCalc issue during foreach().
+# v1.6.0 : Added katalt=FILE = assembly vs alternative haplotype KAT kmer frequencies for plotting. Improved CN prediction for low numbers.
+version = "v1.6.0"
 
 ####################################### ::: USAGE ::: ############################################
 # Example use:
@@ -58,6 +63,7 @@ version = "v1.5.0"
 # : seqstats=T/F = Whether to output statistics for each sequence
 # : katfile=FILE = high accuracy read KAT kmer frequencies for plotting 
 # : katself=FILE = assembly vs self KAT kmer frequencies for plotting 
+# : katalt=FILE = assembly vs alternative haplotype KAT kmer frequencies for plotting 
 # : homfile=FILE = assembly self-mapping homology depth file for plotting 
 # : pngdir=PATH = output path for PNG graphics
 # : pointsize=X = adjust the output text size [24]
@@ -94,9 +100,9 @@ version = "v1.5.0"
 
 ####################################### ::: SETUP ::: ############################################
 ### ~ Commandline arguments ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
-defaults = list(adjust=12,scdepth=0,busco="",depfile="",regfile="",threads=0,
-                winsize=0,winstep=1,debug=FALSE,chromcheck="None",cnmax=4,
-                katfile='None', katself='None', homfile='None',
+defaults = list(adjust=12,scdepth=0,busco="",depfile="",regfile="",threads=0,verbose=1,
+                winsize=0,winstep=1,debug=FALSE,dev=FALSE,chromcheck="None",cnmax=4,
+                katfile='None', katself='None', homfile='None', katalt= 'None',
                 seqstats=FALSE,sigdif=FALSE,seqnames=vector(),outdir=".",
                 pngwidth=1200,pngheight=900,pointsize=24,pngdir="pngplots",
                 basefile="depthcopy",buscocn=TRUE,fragmented=FALSE,rscript=TRUE,
@@ -118,7 +124,7 @@ for(cmd in argvec){
     settings[[cmdv[1]]] = TRUE    
   }
 }
-for(cmd in c("adjust","pngwidth","pngheight","pointsize","threads","winsize","cnmax")){
+for(cmd in c("adjust","pngwidth","pngheight","pointsize","threads","winsize","cnmax","verbose")){
   settings[[cmd]] = as.integer(settings[[cmd]])
 }
 for(cmd in c("scdepth","winstep")){
@@ -132,7 +138,7 @@ for(cmd in c("reghead","gfftype","chromcheck","collapse")){
     settings[[cmd]] <- defaults[[cmd]]
   }
 }
-for(cmd in c("debug","seqstats","sigdif","buscocn")){
+for(cmd in c("debug","seqstats","sigdif","buscocn","dev")){
   settings[[cmd]] = as.logical(settings[[cmd]])
 }
 
@@ -219,19 +225,50 @@ if(settings$threads != 1 & "doParallel" %in% installed.packages()[,"Package"]){
 depthList <- function(filename){
   deplist = list()
   indata = readLines(filename)
-  i = 1
-  logWrite(paste0("Loading depth data from ",filename,"..."))
+  if(sapply(strsplit(filename, "\\."), tail, 1) == "cvg"){
+    logWrite(paste0("Loading kmer data from ",filename,"..."))
+  }else{
+    logWrite(paste0("Loading depth data from ",filename,"..."))
+  }
   cat("", file = stderr())
-  while(i < length(indata)){
-    cat(".", file = stderr())
-    seqname = indata[i]
-    seqname = substr(seqname,2,nchar(seqname))
-    deplist[[seqname]] = as.integer(strsplit(indata[i+1]," ")[[1]])
-    i = i + 2
+  if(settings$threads > 1 && settings$dev){
+      cat(paste(settings$threads,"threads"), file = stderr())
+      # Split indices into chunks for parallel processing
+      indices <- seq(1, length(indata), 2)
+      chunks <- split(indices, cut(indices, settings$threads, labels = FALSE))
+
+      # Parallel processing of the data
+      deplist <- foreach(chunk = chunks, .combine = 'c', .packages = 'base') %dopar% {
+        chunk_deplist <- list()
+        for (i in chunk) {
+          seqname <- indata[i]
+          seqname <- substr(seqname, 2, nchar(seqname))
+          # Reduce to first word
+          seqname <- sapply(strsplit(seqname, " "), `[`, 1)
+          chunk_deplist[[seqname]] <- as.integer(strsplit(indata[i + 1], " ")[[1]])
+          cat(".", file = stderr())
+        }
+        return(chunk_deplist)
+      }
+  }else{
+      # Without parallelisation
+      i = 1
+      while(i < length(indata)){
+        cat(".", file = stderr())
+        seqname = indata[i]
+        seqname = substr(seqname,2,nchar(seqname))
+        seqname <- sapply(strsplit(seqname, " "), `[`, 1)
+        deplist[[seqname]] = as.integer(strsplit(indata[i+1]," ")[[1]])
+        i = i + 2
+      }
   }
   cat("\n", file = stderr())
-  logWrite(paste("#DEPTH Depth data for",length(deplist),"sequences loaded from",filename))
-  return(deplist)  
+  if(sapply(strsplit(filename, "\\."), tail, 1) == "cvg"){
+    logWrite(paste("#KMERS Kmer data for",length(deplist),"sequences loaded from",filename))
+  }else{
+    logWrite(paste("#DEPTH Depth data for",length(deplist),"sequences loaded from",filename))
+  }
+  return(deplist)
 }
 
 
@@ -384,13 +421,11 @@ gffTable <- function(filename,gfftype="gene"){
   if(nrow(gffdb)<1){
     return(gffdb)
   }
-  gffdb$ID = ""
-  gffdb = gffdb %>% select(SeqName, Source, FType, Start, End, Strand, ID, Attributes)
-  for(i in 1:nrow(gffdb)){
-    gffdb$ID[i] = gffIDFromAtt(gffdb$Attributes[i]) 
-  }
+  gffdb = gffdb %>%
+    mutate(ID = sapply(Attributes, gffIDFromAtt)) %>%
+    select(SeqName, Source, FType, Start, End, Strand, ID, Attributes)
   #logWrite(paste(nrow(gffdb),"regions loaded from",filename))
-  logWrite(paste('#GFF',nrow(gffdb),"GFF filtered regions retained from",filename))
+  logWrite(paste('#GFF ID from Attribute extraction complete.'))
   if(length(settings$seqnames) > 0){
     #gffdb <- gffdb %>% filter(SeqName %in% settings$seqnames)
     gffdb <- gffdb[gffdb$SeqName %in% settings$seqnames,]
@@ -399,11 +434,14 @@ gffTable <- function(filename,gfftype="gene"){
   #Pull out special attributes to Family
   if("rRNA" %in% gffdb$FType){
     gffdb <- gffdb %>%
-        mutate(Family = if_else(FType == "rRNA", str_extract(Attributes, "Name=(\\S+);") %>% str_remove("Name=") %>% str_remove(';'), NA))
+        mutate(Family = if_else(FType == "rRNA", str_extract(ID, "product=(\\S+)") %>% str_remove("product="), NA)) %>%
+        mutate(Family = if_else(is.na(Family) & FType == "rRNA", str_extract(Attributes, "product=(\\S+)") %>% str_remove("product="), NA))
+    logWrite(paste('#FAM',"Extracted families for",sum(! is.na(gffdb$Family)),"rRNA GFF regions."))
   }
   if("RepeatMasker" %in% gffdb$Source){
     gffdb <- gffdb %>%
         mutate(Family = str_extract(Attributes, "Motif:(\\S+)") %>% str_remove("Motif:") %>% str_remove('"'))
+    logWrite(paste('#FAM',"Extracted families for",sum(! is.na(gffdb$Family)),"RepeatMasker GFF regions."))
   }
 
   return(gffdb)
@@ -413,9 +451,9 @@ gffTable <- function(filename,gfftype="gene"){
 #i# Sets dp etc. for output fields in a table then returns for output
 tidyTable <- function(regdb){
   ifields = c("Start","End",reghead[2],reghead[3],"ModeX","BP")
-  dp1fields = c("AdjBP")
-  dp2fields = c("MeanX","MedX","DensX","DensK","HomPC")
-  dp3fields = c("SelfK","CN","CIsyst","CIrand")
+  dp1fields = c("AdjBP","XBP")
+  dp2fields = c("MeanX","MedX","DensX","DensK","HomPC","XN")
+  dp3fields = c("SelfK","AltK","CN","CIsyst","CIrand")
   #i# Integers
   for(colname in ifields){
     if(colname %in% colnames(regdb)){
@@ -447,7 +485,8 @@ tidyTable <- function(regdb){
 ### ~ Calculate SC Depth ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
 #i# Straight mode of depth vector
 getmode <- function(v) {
-  uniqv <- unique(v)
+  # Return the largest in the case of a tie.
+  uniqv <- rev(unique(v)) 
   return(uniqv[which.max(tabulate(match(v, uniqv)))])
 }
 #i# Density plotting function
@@ -478,9 +517,15 @@ densModeZoom <- function(depvec,adjust=16,plotbase=NA,plotmain=NA){
     }
     return(0)
   }
-  centre = getmode(depvec)
-  if(centre <= 1){
+  if(sum(depvec[depvec > 0]) == 0){
+    centre <- 0
+  }else{
+    centre = getmode(depvec[depvec > 0])
+  }
+  if(centre <= 0){
     if(settings$debug){
+      cat(depvec[1:100])
+      cat(depvec[length(depvec)-99:length(depvec)])
       logWrite("Centre <= 0")
     }
     return(0)
@@ -507,6 +552,9 @@ densModeZoom <- function(depvec,adjust=16,plotbase=NA,plotmain=NA){
   }
   depdens = density(newvec,n=n,adjust=adjust)
   scdepth = depdens$x[depdens$y == max(depdens$y)]
+  if(length(scdepth) > 1){
+    scdepth <- mean(scdepth)
+  }
   if(! is.na(plotbase)){
     bdens = density(newvec,n=n)
     ## --- ##
@@ -564,6 +612,7 @@ buscoDepData <- function(buscofile,deplist){
   ### ~ Save SC Depth ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
   if(scdepth > 0){
     outfile = paste(settings$depfile,"scdepth",sep=".",collapse=".")
+    if(settings$fragmented){ outfile = paste(settings$depfile,"frag.scdepth",sep=".",collapse=".") }
     logWrite(paste(nrow(buscodb),"BUSCO Complete SC Depth output to",outfile))
     write(scdepth,outfile)
     if(settings$scdepth > 0){
@@ -623,12 +672,28 @@ buscoDepCalc <- function(buscodat){
     dependencies <- findGlobals(processBUSCORow, merge = FALSE)
     newbuscodb <- foreach(i = 1:nrow(buscodb), .combine = rbind, .packages = c("tidyverse"), .export = c(dependencies$variables,"buscovec")) %dopar% {
       row <- buscodb[i, ]
-      processed_row <- processBUSCORow(row,buscovec)
-      return(processed_row)
+      tryCatch(
+        {
+          processed_row <- processBUSCORow(row,buscovec)
+          return(processed_row)
+        },
+        error = function(e){
+          traceback()
+          logWrite(paste("#WARN BUSCOID",row$BuscoID,"raising a buscoDepCalc error."))
+          row$Meanx <- -1
+          return(row)
+        }
+      )
     }
     cat("\n", file = stderr())
-    # Convert the results back to a data frame
-    buscodb <- as.data.frame(newbuscodb)
+    newbuscodb <- as.tibble(newbuscodb)
+    badrows <- newbuscodb %>% filter(MeanX < 0)
+    if(nrow(badrows) > 0){
+      logWrite(paste("#WARN",nrow(badrows),"BUSCOID rejected from buscoDepCalc due to unknown processing errors. Repeat with threads=1 if every gene required."))
+      newbuscodb <- newbuscodb %>% filter(Meanx >= 0)
+    }
+    # Convert the results back to buscodb data frame
+    buscodb <- newbuscodb
   }else{
       for(i in 1:nrow(buscodb)){
         seqdep = buscovec[[buscodb$BuscoID[i]]]
@@ -649,9 +714,11 @@ buscoDepCalc <- function(buscodat){
   # Add Homology / Kmer data if present
   buscodb$DensK = NA
   buscodb$SelfK = NA
+  buscodb$AltK = NA
   buscodb$HomPC = NA
   writeLines("Calculating BUSCO kmers/homology...")
   # Calculate region stats
+  #!# Upgrade using settings$threads
   prevname = ""
   for(i in 1:nrow(buscodb)){
     seqname = buscodb$Contig[i]
@@ -674,12 +741,20 @@ buscoDepCalc <- function(buscodat){
       seqdep = depVector(seqname,seqi,seqj,selflist)
       buscodb$SelfK[i] = densModeZoom(seqdep,adjust=settings$adjust)
     }
+    if(file.exists(katalt)){
+      #i# katalt = alternative assembly kmer frequencies
+      seqdep = depVector(seqname,seqi,seqj,altlist)
+      buscodb$AltK[i] = densModeZoom(seqdep,adjust=settings$adjust)
+    }
     if(file.exists(homfile)){
       #i# homlist = Assembly vs self homology
       seqdep = depVector(seqname,seqi,seqj,homlist)
       #buscodb$HomX[i] = densModeZoom(seqdep,adjust=settings$adjust)
       buscodb$HomPC[i] = 100.0 * sum(seqdep > 0) / length(seqdep)
     }
+  }
+  if(settings$debug){
+    print(head(buscodb))
   }
   cat("\n", file = stderr())
   logWrite("#BUSCO BUSCO kmer/homology calculations complete.")
@@ -724,13 +799,59 @@ processRegCNrow <- function(regdb,i){
       regdb$CN[i] = regdb$DensX[i] / scdepth
       regdb$CIsyst[i] = 1.96 * buscoSD * sqrt(regdb$DensX[i] / (buscoMean ** 3))
       regdb$CIrand[i] = 1.96 * buscoSD * regdb$DensX[i] / (buscoMean ** 2)
-      writeLines(paste0(seqname,":",seqi,"-",seqj," = ",round(regdb$DensX[i],2),"X = ",round(regdb$CN[i],2),"N +/- ",round(regdb$CIrand[i],2)))
+      if(settings$verbose > 0){
+        writeLines(paste0(seqname,":",seqi,"-",seqj," = ",round(regdb$DensX[i],2),"X = ",round(regdb$CN[i],2),"N +/- ",round(regdb$CIrand[i],2)))
+      }
     }else{
       logWrite(paste0("#WARN Region ",seqname,":",seqi,"-",seqj," has zero-length depth vector"))
     }
     return(regdb[i,])
 }
-depVector <- function(seqname,posi,posj,deplist){
+processRegKHomrow <- function(regdb,i){
+    cat(".", file = stderr())
+    seqname = regdb[i,reghead[1]]
+    seqi = regdb[i,reghead[2]]
+    seqj = regdb[i,reghead[3]]
+    if(seqi > seqj){
+      seqi = regdb[i,reghead[3]]
+      seqj = regdb[i,reghead[2]]
+    }
+    if(file.exists(katfile)){
+      #i# katlist = raw read kmer frequencies
+      seqdep = depVector(seqname,seqi,seqj,katlist)
+      regdb$DensK[i] = densModeZoom(seqdep,adjust=settings$adjust)
+    }
+    if(file.exists(katself)){
+      #i# katself = assembly kmer frequencies
+      seqdep = depVector(seqname,seqi,seqj,selflist)
+      regdb$SelfK[i] = densModeZoom(seqdep,adjust=settings$adjust)
+    }
+    if(file.exists(katalt)){
+      #i# katalt = alternative assembly kmer frequencies
+      seqdep = depVector(seqname,seqi,seqj,altlist)
+      regdb$AltK[i] = densModeZoom(seqdep,adjust=settings$adjust)
+    }
+    if(file.exists(homfile)){
+      #i# homlist = Assembly vs self homology
+      seqdep = depVector(seqname,seqi,seqj,homlist)
+      #regdb$HomX[i] = densModeZoom(seqdep,adjust=settings$adjust)
+      if(length(seqdep) > 0){
+        regdb$HomPC[i] = 100.0 * sum(seqdep > 0) / length(seqdep)
+      }
+    }
+    return(regdb[i,])
+}
+
+depVector <- function(seqname,posi,posj,deplist,deptxt="depth dictionary"){
+  if(! seqname %in% names(deplist)){
+    logWrite(paste0("#WARN Sequence ",seqname," not found ",deptxt))
+    return(vector())
+  }else{
+    if(posj > length(deplist[[seqname]])){
+      logWrite(paste0("#WARN Region end (",posj,") exceeds ",deptxt," length for ",seqname,":",length(deplist[[seqname]])))
+      posj <- length(deplist[[seqname]])
+    }
+  }
   if(posj < posi){ return(vector()) }
   return(deplist[[seqname]][posi:posj])
 }
@@ -777,7 +898,9 @@ regCN <- function(regdb,buscoMean=0,buscoSD=0){
           regdb$CN[i] = regdb$DensX[i] / scdepth
           regdb$CIsyst[i] = 1.96 * buscoSD * sqrt(regdb$DensX[i] / (buscoMean ** 3))
           regdb$CIrand[i] = 1.96 * buscoSD * regdb$DensX[i] / (buscoMean ** 2)
-          writeLines(paste0(seqname,":",seqi,"-",seqj," = ",round(regdb$DensX[i],2),"X = ",round(regdb$CN[i],2),"N +/- ",round(regdb$CIrand[i],2)))
+          if(settings$verbose > 0){
+            writeLines(paste0(seqname,":",seqi,"-",seqj," = ",round(regdb$DensX[i],2),"X = ",round(regdb$CN[i],2),"N +/- ",round(regdb$CIrand[i],2)))
+          }
         }else{
           logWrite(paste0("#WARN Region ",seqname,":",seqi,"-",seqj," has zero-length depth vector"))
         }
@@ -787,41 +910,60 @@ regCN <- function(regdb,buscoMean=0,buscoSD=0){
   # Add Homology / Kmer data if present
   regdb$DensK = NA
   regdb$SelfK = NA
+  regdb$AltK = NA
   #regdb$HomX = NA
   regdb$HomPC = NA
+  if(! file.exists(katfile) && ! file.exists(katself) && ! file.exists(katalt) && ! file.exists(homfile) ){
+    return(regdb)
+  }
   logWrite("Calculating region kmers/homology...")
   cat("", file = stderr())
-  # Calculate region stats
-  prevname = ""
-  for(i in 1:nrow(regdb)){
-    seqname = regdb[i,reghead[1]]
-    if(seqname != prevname){
-      prevname = seqname
-      if(settings$debug){
-        cat(seqname)
+  if(settings$threads > 1){
+    dependencies <- findGlobals(processRegKHomrow, merge = FALSE)
+    newregdb <- foreach(i = 1:nrow(regdb), .combine = rbind, .packages = c("tidyverse"), .export = c(dependencies$variables)) %dopar% {
+      processed_row <- processRegKHomrow(regdb,i)
+      return(processed_row)
+    }
+    # Convert the results back to a data frame
+    regdb <- as.data.frame(newregdb)
+  }else{
+      # Calculate region stats
+      prevname = ""
+      for(i in 1:nrow(regdb)){
+        seqname = regdb[i,reghead[1]]
+        if(seqname != prevname){
+          prevname = seqname
+          if(settings$debug){
+            cat(seqname)
+          }
+        }
+        cat(".", file = stderr())
+        seqi = regdb[i,reghead[2]]
+        seqj = regdb[i,reghead[3]]
+        if(file.exists(katfile)){
+          #i# katlist = raw read kmer frequencies
+          seqdep = depVector(seqname,seqi,seqj,katlist)
+          regdb$DensK[i] = densModeZoom(seqdep,adjust=settings$adjust)
+        }
+        if(file.exists(katself)){
+          #i# katself = assembly kmer frequencies
+          seqdep = depVector(seqname,seqi,seqj,selflist)
+          regdb$SelfK[i] = densModeZoom(seqdep,adjust=settings$adjust)
+        }
+        if(file.exists(katalt)){
+          #i# katalt = alternative assembly kmer frequencies
+          seqdep = depVector(seqname,seqi,seqj,altlist)
+          regdb$AltK[i] = densModeZoom(seqdep,adjust=settings$adjust)
+        }
+        if(file.exists(homfile)){
+          #i# homlist = Assembly vs self homology
+          seqdep = depVector(seqname,seqi,seqj,homlist)
+          #regdb$HomX[i] = densModeZoom(seqdep,adjust=settings$adjust)
+          if(length(seqdep) > 0){
+            regdb$HomPC[i] = 100.0 * sum(seqdep > 0) / length(seqdep)
+          }
+        }
       }
-    }
-    cat(".", file = stderr())
-    seqi = regdb[i,reghead[2]]
-    seqj = regdb[i,reghead[3]]
-    if(file.exists(katfile)){
-      #i# katlist = raw read kmer frequencies
-      seqdep = depVector(seqname,seqi,seqj,katlist)
-      regdb$DensK[i] = densModeZoom(seqdep,adjust=settings$adjust)
-    }
-    if(file.exists(katself)){
-      #i# katself = assembly kmer frequencies
-      seqdep = depVector(seqname,seqi,seqj,selflist)
-      regdb$SelfK[i] = densModeZoom(seqdep,adjust=settings$adjust)
-    }
-    if(file.exists(homfile)){
-      #i# homlist = Assembly vs self homology
-      seqdep = depVector(seqname,seqi,seqj,homlist)
-      #regdb$HomX[i] = densModeZoom(seqdep,adjust=settings$adjust)
-      if(length(seqdep) > 0){
-        regdb$HomPC[i] = 100.0 * sum(seqdep > 0) / length(seqdep)
-      }
-    }
   }
   cat("\n", file = stderr())
   logWrite("#KCALC Region kmer/homology calculations complete.")
@@ -884,7 +1026,7 @@ deplist = depthList(depfile)
 settings$seqnames = names(deplist)
 
 ## ~ Additional vectors for cross-plotting ~ ##
-#i# katfile=FILE, katself=FILE, homfile=FILE
+#i# katfile=FILE, katself=FILE, katalt=FILE, homfile=FILE
 katfile = settings$katfile
 logWrite(paste("KAT File:",katfile))
 if(file.exists(katfile)){
@@ -914,11 +1056,32 @@ if(file.exists(katself)){
     seqkat = selflist[[seqname]]
     k = seqlen - length(seqkat)
     if(settings$debug){
-      writeLines(paste(seqname,"Pad",k,"kmers"))
+      writeLines(paste(seqname,"Pad",k,"self kmers"))
+      writeLines(paste(seqkat[1:100],collapse=" "))
     }
     i = as.integer(k/2)
     if(k > 0){
       selflist[[seqname]] = c( rep(seqkat[1],i), seqkat, rep(seqkat[length(seqkat)],k-i) )
+    }
+  }
+}
+#i# Assembly versus Alt assembly KAT
+katalt = settings$katalt
+logWrite(paste("Alt-KAT File:",katalt))
+if(file.exists(katalt)){
+  altlist = depthList(katalt)
+  # Pad kmer counts
+  for(seqname in names(altlist)){
+    seqlen = length(deplist[[seqname]])
+    seqkat = altlist[[seqname]]
+    k = seqlen - length(seqkat)
+    if(settings$debug){
+      writeLines(paste(seqname,"Pad",k,"alt kmers"))
+      writeLines(paste(seqkat[1:100],collapse=" "))
+    }
+    i = as.integer(k/2)
+    if(k > 0){
+      altlist[[seqname]] = c( rep(seqkat[1],i), seqkat, rep(seqkat[length(seqkat)],k-i) )
     }
   }
 }
@@ -985,7 +1148,7 @@ if(file.exists(buscofile)){
 ### ~ Calculate Region CN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
 #i# 3. Load region files
 #i# Cycle through regfile split on , and trying to split name:file on ":"
-adjdb <- tibble(Dataset=c(),Collapse=c(),TypeN=c(),N=c(),CN=c(),BP=c(),AdjBP=c())
+adjdb <- tibble(Dataset=c(),Collapse=c(),TypeN=c(),N=c(),CN=c(),XN=c(),BP=c(),AdjBP=c(),XBP=c())
 for(regfile in strsplit(settings$regfile,",",TRUE)[[1]]){
 	regname = "Regions"
 	if(length(strsplit(regfile,":",TRUE)[[1]]) > 1){
@@ -1033,22 +1196,24 @@ for(regfile in strsplit(settings$regfile,",",TRUE)[[1]]){
 	    outfile = paste(c(settings$basefile,outvec[1:length(outvec)-1],cfield,"tsv"),sep=".",collapse=".")
 	    colldb <- regdb %>% filter(! is.na(!!sym(cfield))) %>%
 	      rename(SeqName=reghead[1],Start=reghead[2],End=reghead[3]) %>%
-	      select(SeqName,!!sym(cfield),Start,End,MeanX,MedX,ModeX,DensX,CN,DensK,SelfK,HomPC) %>%
-	      mutate(Length=End-Start+1, AdjLen=Length*CN) %>%
+	      select(SeqName,!!sym(cfield),Start,End,MeanX,MedX,ModeX,DensX,CN,DensK,SelfK,HomPC,AltK) %>%
+        mutate(MeanX = if_else(is.na(MeanX),0,MeanX)) %>%
+	      mutate(Length=End-Start+1, AdjLen=Length*CN, XLen=Length*MeanX) %>%
 	      group_by(SeqName,!!sym(cfield)) %>%
-	      summarise(N=n(),CN=sum(CN),BP=sum(Length),AdjBP=sum(AdjLen))
-          #p <- vplot(pdata %>% filter(Metric == !!metric),
-        logWrite(paste("#SAVE",nrow(colldb),"Collapsed CN output to",outfile))
+	      summarise(N=n(),CN=sum(CN),XN=sum(MeanX),BP=sum(Length),AdjBP=sum(AdjLen),XBP=sum(XLen))
+      colldb$XN <- colldb$XN / scdepth
+      colldb$XBP <- colldb$XBP / scdepth 
+      logWrite(paste("#SAVE",nrow(colldb),"Collapsed CN output to",outfile))
 	    write.table(tidyTable(colldb),outfile,sep="\t",quote=FALSE,row.names=FALSE)
 	    outfile = paste(c(settings$basefile,outvec[1:length(outvec)-1],cfield,"total.tsv"),sep=".",collapse=".")
 	    colldb <- colldb %>% group_by(!!sym(cfield)) %>%
-	      summarise(N=sum(N),CN=sum(CN),BP=sum(BP),AdjBP=sum(AdjBP))
-        logWrite(paste("#SAVE",nrow(colldb),"Collapsed CN totals output to",outfile))
+	      summarise(N=sum(N),CN=sum(CN),XN=sum(XN),BP=sum(BP),AdjBP=sum(AdjBP),XBP=sum(XBP))
+      logWrite(paste("#SAVE",nrow(colldb),"Collapsed CN totals output to",outfile))
 	    write.table(tidyTable(colldb),outfile,sep="\t",quote=FALSE,row.names=FALSE)
 	    adjrow <- colldb %>% mutate(Dataset=regname,Collapse=cfield) %>%
-	      group_by(Dataset,Collapse) %>% summarise(TypeN=n(),N=sum(N),CN=sum(CN),BP=sum(BP),AdjBP=sum(AdjBP))
+	      group_by(Dataset,Collapse) %>% summarise(TypeN=n(),N=sum(N),CN=sum(CN),XN=sum(XN),BP=sum(BP),AdjBP=sum(AdjBP),XBP=sum(XBP))
 	    adjdb <- bind_rows(adjdb,adjrow)
-      }
+    }
 	}
 }
 if(nrow(adjdb)>0){
@@ -1057,18 +1222,15 @@ if(nrow(adjdb)>0){
 	write.table(tidyTable(adjdb),outfile,sep="\t",quote=FALSE,row.names=FALSE)
 }
 
+### ~ Base table for sequence and window stats ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
+lendb <- tibble(SeqName = names(deplist), Start = 1, End = map_int(deplist, length) )
+
 ### ~ Calculate SeqStats CN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
 #i# Make whole sequences regions table
 if(settings$seqstats){
-  scaffdb = tibble(SeqName=c(),Start=c(),End=c())
-  for(seqname in names(deplist)){
-    seqlen = length(deplist[[seqname]])
-    scaffdb <- bind_rows(scaffdb,
-                         tibble(SeqName=seqname,Start=1,End=seqlen))
-  }
   #i# Calculate CN per sequence
   reghead = c("SeqName","Start","End")
-  scaffdb <- regCN(as.data.frame(scaffdb),buscoMean,buscoSD)
+  scaffdb <- regCN(as.data.frame(lendb),buscoMean,buscoSD)
   ### ~ Save CN table ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
   #i# Output table to with CN data
   outfile = paste0(settings$basefile,".sequences.regcnv.tsv")
@@ -1081,35 +1243,77 @@ if(settings$seqstats){
 #i# Make window regions table
 if(settings$winsize>0){
   logWrite(paste('#WINREG',settings$winsize,'bp windows at',settings$winstep,"intervals"))
-  windb = tibble(SeqName=c(),Start=c(),End=c(),SeqLen=c())
-  for(seqname in names(deplist)){
-    seqlen = length(deplist[[seqname]])
-    if(seqlen <= settings$winsize){
-      windb <- bind_rows(windb,
-                         tibble(SeqName=seqname,Start=1,End=seqlen,SeqLen=seqlen))
-      logWrite(paste0(seqname,"(",seqlen," bp) => 1 window"))
-    }else{
-      winx = as.integer(seqlen / settings$winstep) + 1
-      starts = 0:winx * settings$winstep + 1
-      ends = starts + settings$winsize - 1
-      seqdb <- tibble(Start=starts,End=ends) %>% 
-        filter(End <= seqlen)
-      #i# Extend final window if within 1/2 winstep of sequence end
-      if((max(seqdb$End) - seqlen) < (0.5 * settings$winstep)){
-          seqdb[nrow(seqdb),]$End = seqlen
-          seqdb <- seqdb %>% mutate(SeqName=seqname,SeqLen=seqlen)
-      #i# Otherwise, add a new window to sequence end
-      }else{
-		  seqdb <- seqdb %>%
-			add_row(Start=max(seqdb$Start)+settings$winstep,
-					End=min(seqlen,max(seqdb$End)+settings$winstep)) %>%
-			mutate(SeqName=seqname,SeqLen=seqlen)
+  #i# nowindb scaffolds are too small for splitting
+  nowindb <- lendb %>% filter(End < (settings$winsize + 0.5 * settings$winstep))
+  logWrite(paste('#WINREG',nrow(nowindb),'of',nrow(lendb),'scaffolds too short for splitting into windows.'))
+  #i# split the longer scaffolds into windows
+  windb <- lendb %>% filter(End >= (settings$winsize + 0.5 * settings$winstep))
+  if(nrow(windb) > 0){
+    windb <- windb %>%
+        rename(RawStart = Start, RawEnd = End) %>%
+        rowwise() %>%
+        mutate(
+          windows = list(
+            if (RawEnd <= settings$winsize) {
+              tibble(Start = RawStart, End = RawEnd)
+            } else {
+              seqs <- seq(RawStart, RawEnd, by = settings$winstep)
+              windows <- tibble(
+                Start = seqs,
+                End = pmin(seqs + settings$winsize - 1, RawEnd)
+              )
+              windows
+            }
+          )
+        ) %>%
+        unnest(windows) %>%
+        ungroup() %>%
+        filter(Start < End) %>%
+        select(SeqName, Start, End)
+    # Adjust short windows
+    if(nrow(windb) > 0){
+      windb$TrimWin <- (windb$Start > 1) & ((windb$End - windb$Start + 1) < (0.5 * settings$winstep))
+      for(i in c(1:nrow(windb))[windb$TrimWin]){
+        windb$End[i - 1] <- windb$End[i]
       }
-        
-      windb <- bind_rows(windb,seqdb) %>% select(SeqName,Start,End,SeqLen)
-      writeLines(paste0(seqname,"(",seqlen," bp) => ",nrow(seqdb)," windows"))
+      windb <- windb %>% filter(!TrimWin) %>% select(-TrimWin)
     }
   }
+  logWrite(paste('#WINREG',nrow(windb),'windows from',nrow(lendb)-nrow(nowindb),'longer scaffolds.'))
+  windb <- bind_rows(windb, nowindb)
+
+#   windb = tibble(SeqName=c(),Start=c(),End=c(),SeqLen=c())
+#   for(seqname in names(deplist)){
+#     seqlen = length(deplist[[seqname]])
+#     if(seqlen <= settings$winsize){
+#       windb <- bind_rows(windb,
+#                          tibble(SeqName=seqname,Start=1,End=seqlen,SeqLen=seqlen))
+#       logWrite(paste0(seqname," (",seqlen," bp) => 1 window"))
+#     }else{
+#       winx = as.integer(seqlen / settings$winstep) + 1
+#       starts = 0:winx * settings$winstep + 1
+#       ends = starts + settings$winsize - 1
+#       seqdb <- tibble(Start=starts,End=ends) %>%
+#         filter(End <= seqlen)
+#       #i# Extend final window if within 1/2 winstep of sequence end
+#       if((max(seqdb$End) - seqlen) < (0.5 * settings$winstep)){
+#           seqdb[nrow(seqdb),]$End = seqlen
+#           seqdb <- seqdb %>% mutate(SeqName=seqname,SeqLen=seqlen)
+#       #i# Otherwise, add a new window to sequence end
+#       }else{
+# 		  seqdb <- seqdb %>%
+# 			add_row(Start=max(seqdb$Start)+settings$winstep,
+# 					End=min(seqlen,max(seqdb$End)+settings$winstep)) %>%
+# 			mutate(SeqName=seqname,SeqLen=seqlen)
+#       }
+#
+#       windb <- bind_rows(windb,seqdb) %>% select(SeqName,Start,End,SeqLen)
+#       writeLines(paste0(seqname," (",seqlen," bp) => ",nrow(seqdb)," windows"))
+#     }
+#   }
+
+  logWrite(paste('#WINREG',nrow(windb),'windows for CN calclations.'))
+
   #i# Calculate CN per region
   reghead = c("SeqName","Start","End")
   windb <- regCN(as.data.frame(windb),buscoMean,buscoSD)
@@ -1157,7 +1361,7 @@ if(settings$writexl){
 
 ### ~ Generate new Plot database ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ###
 reghead <- settings$reghead
-newplotdb = tibble(Dataset=c(),SeqName=c(),Start=c(),End=c(),MeanX=c(),MedX=c(),ModeX=c(),DensX=c(),CN=c(),DensK=c(),SelfK=c(),HomPC=c())
+newplotdb = tibble(Dataset=c(),SeqName=c(),Start=c(),End=c(),MeanX=c(),MedX=c(),ModeX=c(),DensX=c(),CN=c(),DensK=c(),SelfK=c(),HomPC=c(),AltK=c())
 for(rname in names(reglist)){
 	adddb <- reglist[[rname]]
     if(nrow(adddb) < 1){ next }
@@ -1171,7 +1375,7 @@ for(rname in names(reglist)){
 	newplotdb <- bind_rows(newplotdb, 
                       adddb %>% 
                         mutate(Dataset=rname) %>%
-                        select(Dataset,SeqName,Start,End,MeanX,MedX,ModeX,DensX,CN,DensK,SelfK,HomPC))
+                        select(Dataset,SeqName,Start,End,MeanX,MedX,ModeX,DensX,CN,DensK,SelfK,AltK,HomPC))
 }
 newplotdb$Dataset <- ordered(newplotdb$Dataset,levels=names(reglist))
 #levels(newplotdb$Dataset) <- names(reglist)
@@ -1228,7 +1432,7 @@ vioPlot <- function(plotdb,plotfield){
 	p <- p + theme(axis.text.x = element_text(angle = 90))
   }
 
-  if(plotfield %in% c("CN","SelfK")){
+  if(plotfield %in% c("CN","SelfK","AltK")){
     p <- p + geom_hline(yintercept=1, color="steelblue", linetype="dashed")
   }
   if(plotfield %in% c("MeanX","MedX","ModeX","DensX")){
@@ -1245,6 +1449,9 @@ if(file.exists(katfile)){
 }
 if(file.exists(katself)){
   plotfields = c(plotfields, "SelfK")
+}
+if(file.exists(katalt)){
+  plotfields = c(plotfields, "AltK")
 }
 if(file.exists(homfile)){
   plotfields = c(plotfields, "HomPC")

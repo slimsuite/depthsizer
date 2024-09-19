@@ -26,7 +26,7 @@ logWrite(paste("#PATH Running from:",getwd()))
 ####################################### ::: INSTALL ::: ############################################
 #i# Check and install packages
 if(! "packages" %in% ls()){
-  packages <- c("tidyverse","RColorBrewer","gtools","ggstatsplot","ggrepel","writexl","doParallel","foreach","DT")
+  packages <- c("tidyverse","RColorBrewer","gtools","ggstatsplot","ggrepel","ggridges","writexl","doParallel","foreach","DT")
 }
 if("settings" %in% ls() && "packages" %in% names(settings)){
   packages <- settings$packages

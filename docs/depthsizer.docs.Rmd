@@ -1,7 +1,7 @@
 ---
-title: "DepthSizer V1.9.0 Documentation"
+title: "DepthSizer V1.9.3 Documentation"
 author: "Richard J. Edwards"
-date: "2024-07-19"
+date: "2024-09-19"
 output:
   html_document:
     css: http://www.slimsuite.unsw.edu.au/stylesheets/slimhtml.css

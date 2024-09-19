@@ -19,8 +19,8 @@
 """
 Module:       depthsizer
 Description:  Read-depth based genome size prediction
-Version:      1.9.0
-Last Edit:    19/07/24
+Version:      1.9.3
+Last Edit:    01/08/24
 Citation:     Chen SH et al. & Edwards RJ (2022): Mol. Ecol. Res. (doi: 10.1111/1755-0998.13574)
 Copyright (C) 2021  Richard J. Edwards - See source code for GNU License Notice
 
@@ -136,6 +136,9 @@ def history():  ### Program History - only a method for PythonWin collapsing! ##
     # 1.7.1 - Fixed inconsistency with output s.f.
     # 1.8.0 - Added reduced=T/F : Only generate/use fastmp for BUSCO-containing sequences (*.busco.fastmp) [True]
     # 1.9.0 - Added multi-threading to the R script and chunking of input sequences for depth calculation.
+    # 1.9.1 - Fixed indelratio to cope with -ve strand BUSCO formatting.
+    # 1.9.2 - Fixed fragmented mode to use different scdepth file.
+    # 1.9.3 - Fixed bug with chunking of input sequences when reduced=T that missed some BUSCO genes.
     '''
 #########################################################################################################################
 def todo():     ### Major Functionality to Add - only a method for PythonWin collapsing! ###
@@ -159,7 +162,7 @@ def todo():     ### Major Functionality to Add - only a method for PythonWin col
 #########################################################################################################################
 def makeInfo(): ### Makes Info object which stores program details, mainly for initial print to screen.
     '''Makes Info object which stores program details, mainly for initial print to screen.'''
-    (program, version, last_edit, copy_right) = ('DepthSizer', '1.9.0', 'July 2024', '2021')
+    (program, version, last_edit, copy_right) = ('DepthSizer', '1.9.3', 'August 2024', '2021')
     description = 'Read-depth based genome size prediction'
     author = 'Dr Richard J. Edwards.'
     comments = ['Citation: Chen SH et al. & Edwards RJ (2022): Mol. Ecol. Res. (doi: 10.1111/1755-0998.13574)',
@@ -203,7 +206,7 @@ def setupProgram(): ### Basic Setup of Program when called from commandline.
         out.verbose(2,2,cmd_list,1)                         # Prints full commandlist if verbosity >= 2 
         out.printIntro(info)                                # Prints intro text using details from Info object
         cmd_list = cmdHelp(info,out,cmd_list)               # Shows commands (help) and/or adds commands from user
-        log = rje.setLog(info,out,cmd_list)                 # Sets up Log object for controlling log file output
+        log = rje.setLog(info,out,cmd_list,py3warn=False)   # Sets up Log object for controlling log file output
         return (info,out,log,cmd_list)                      # Returns objects for use in program
     except SystemExit: sys.exit()
     except KeyboardInterrupt: sys.exit()
